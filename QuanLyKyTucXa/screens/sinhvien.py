@@ -1255,6 +1255,5 @@ class SinhVienScreen(ttk.Frame):
             return
 
         self.refresh()
-        # ly già khú
 
 
