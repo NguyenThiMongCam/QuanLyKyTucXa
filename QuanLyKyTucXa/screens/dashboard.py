@@ -40,3 +40,5 @@ class DashboardScreen(ttk.Frame):
         #             tk.Label(c, text=name, bg=color, fg="white", font=("Segoe UI", 10)).pack(anchor="w")
         #             tk.Label(c, text=str(val), bg=color, fg="white", font=("Segoe UI", 20, "bold")).pack(anchor="w")
         #             grid.columnconfigure(i % 3, weight=1)
+
+         #             grid.columnconfigure(i % 3, weight=1)
