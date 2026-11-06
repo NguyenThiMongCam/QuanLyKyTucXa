@@ -32,3 +32,11 @@ class DashboardScreen(ttk.Frame):
             tk.Label(c, text=name, bg=color, fg="white", font=("Segoe UI", 10)).pack(anchor="w")
             tk.Label(c, text=str(val), bg=color, fg="white", font=("Segoe UI", 20, "bold")).pack(anchor="w")
             grid.columnconfigure(i % 3, weight=1)
+#   grid = ttk.Frame(self)
+#         grid.pack(fill="x", padx=12, pady=16)
+#         for i, (name, val, color) in enumerate(cards):
+#             c = tk.Frame(grid, bg=color, padx=18, pady=14)
+#             c.grid(row=i // 3, column=i % 3, padx=8, pady=8, sticky="nsew")
+#             tk.Label(c, text=name, bg=color, fg="white", font=("Segoe UI", 10)).pack(anchor="w")
+#             tk.Label(c, text=str(val), bg=color, fg="white", font=("Segoe UI", 20, "bold")).pack(anchor="w")
+#             grid.columnconfigure(i % 3, weight=1)
