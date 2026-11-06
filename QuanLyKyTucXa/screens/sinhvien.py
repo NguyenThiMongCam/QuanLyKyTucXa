@@ -1255,5 +1255,6 @@ class SinhVienScreen(ttk.Frame):
             return
 
         self.refresh()
+        # lý đẹp trai nhất BD
 
 
