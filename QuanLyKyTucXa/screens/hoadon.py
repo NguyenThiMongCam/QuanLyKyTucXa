@@ -80,5 +80,3 @@ class HoaDonScreen(CrudScreen):
 
     def delete(self, id_):
         db.execute("DELETE FROM HoaDon WHERE MaHDon=?", (id_,))
-def delete(self, id_):
-        db.execute("DELETE FROM HoaDon WHERE MaHDon=?", (id_,))
