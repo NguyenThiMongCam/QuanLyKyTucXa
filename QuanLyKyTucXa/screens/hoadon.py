@@ -1,724 +1,678 @@
-
+from datetime import date
 import tkinter as tk
-from tkinter import ttk, messagebox
-from datetime import date, datetime
+from tkinter import messagebox, ttk
 import database as db
 from screens.base import money, pick_id
 
 
-BG = "#F3F6FC"
-NAVY = "#172554"
-BLUE = "#2563EB"
-GREEN = "#059669"
-ORANGE = "#D97706"
-RED = "#DC2626"
-WHITE = "#FFFFFF"
-TEXT = "#1E293B"
-MUTED = "#64748B"
-
-
-class HopDongScreen(tk.Frame):
-    def __init__(self, master, user=None):
-        super().__init__(master, bg=BG)
-        self.user = user
-        self.selected_id = None
-        self.build_ui()
-        self.refresh()
-
-    def build_ui(self):
-        header = tk.Frame(self, bg=NAVY, height=105)
-        header.pack(fill="x")
-        header.pack_propagate(False)
-
-        left = tk.Frame(header, bg=NAVY)
-        left.pack(side="left", padx=25, pady=17)
-
-        tk.Label(
-            left,
-            text="QUẢN LÝ HỢP ĐỒNG",
-            bg=NAVY,
-            fg=WHITE,
-            font=("Segoe UI", 20, "bold")
-        ).pack(anchor="w")
-
-        tk.Label(
-            left,
-            text="Quản lý thông tin thuê phòng và thời hạn hợp đồng sinh viên",
-            bg=NAVY,
-            fg="#BFDBFE",
-            font=("Segoe UI", 10)
-        ).pack(anchor="w", pady=(5, 0))
-
-        tk.Label(
-            header,
-            text="📄",
-            bg=NAVY,
-            fg=WHITE,
-            font=("Segoe UI", 32)
-        ).pack(side="right", padx=30)
-
-        cards = tk.Frame(self, bg=BG)
-        cards.pack(fill="x", padx=20, pady=18)
-
-        self.card_values = {}
-
-        card_data = [
-            ("TỔNG HỢP ĐỒNG", "0", BLUE),
-            ("ĐANG THUÊ", "0", GREEN),
-            ("ĐÃ KẾT THÚC", "0", ORANGE),
-            ("SINH VIÊN ĐANG Ở", "0", NAVY)
-        ]
-
-        for i, (title, value, color) in enumerate(card_data):
-            card = tk.Frame(
-                cards,
-                bg=WHITE,
-                highlightbackground="#E2E8F0",
-                highlightthickness=1
-            )
-            card.grid(
-                row=0,
-                column=i,
-                padx=6,
-                sticky="nsew"
-            )
-
-            tk.Frame(card, bg=color, height=4).pack(fill="x")
-
-            content = tk.Frame(
-                card,
-                bg=WHITE,
-                padx=13,
-                pady=13
-            )
-            content.pack(fill="both", expand=True)
-
-            tk.Label(
-                content,
-                text=title,
-                bg=WHITE,
-                fg=MUTED,
-                font=("Segoe UI", 9, "bold")
-            ).pack(anchor="w")
-
-            value_label = tk.Label(
-                content,
-                text=value,
-                bg=WHITE,
-                fg=color,
-                font=("Segoe UI", 19, "bold")
-            )
-            value_label.pack(anchor="w", pady=(8, 2))
-
-            self.card_values[title] = value_label
-            cards.columnconfigure(i, weight=1)
-
-        toolbar = tk.Frame(
-            self,
-            bg=WHITE,
-            padx=15,
-            pady=13
-        )
-        toolbar.pack(fill="x", padx=20, pady=(0, 12))
-
-        tk.Label(
-            toolbar,
-            text="DANH SÁCH HỢP ĐỒNG",
-            bg=WHITE,
-            fg=TEXT,
-            font=("Segoe UI", 12, "bold")
-        ).pack(side="left", padx=(0, 18))
-
-        self.search_var = tk.StringVar()
-
-        search = ttk.Entry(
-            toolbar,
-            textvariable=self.search_var,
-            font=("Segoe UI", 10),
-            width=25
-        )
-        search.pack(side="right", padx=(6, 0), ipady=5)
-        search.bind("<Return>", lambda e: self.refresh())
-
-        tk.Button(
-            toolbar,
-            text="🔍 Tìm kiếm",
-            command=self.refresh,
-            bg="#E0EAFF",
-            fg=BLUE,
-            relief="flat",
-            font=("Segoe UI", 9, "bold"),
-            padx=12,
-            pady=8,
-            cursor="hand2"
-        ).pack(side="right", padx=5)
-
-        actions = tk.Frame(self, bg=BG)
-        actions.pack(fill="x", padx=20, pady=(0, 12))
-
-        self.make_button(
-            actions,
-            "＋ Tạo hợp đồng",
-            BLUE,
-            WHITE,
-            self.add
-        )
-
-        self.make_button(
-            actions,
-            "✓ Kết thúc hợp đồng",
-            ORANGE,
-            WHITE,
-            self.ket_thuc
-        )
-
-        self.make_button(
-            actions,
-            "↻ Làm mới",
-            "#E2E8F0",
-            TEXT,
-            self.refresh
-        )
-
-        self.make_button(
-            actions,
-            "🗑 Xóa hợp đồng",
-            "#FEE2E2",
-            RED,
-            self.delete
-        )
-
-        table_box = tk.Frame(
-            self,
-            bg=WHITE,
-            highlightbackground="#E2E8F0",
-            highlightthickness=1
-        )
-        table_box.pack(
-            fill="both",
-            expand=True,
-            padx=20,
-            pady=(0, 18)
-        )
-
-        style = ttk.Style()
-
-        style.configure(
-            "Contract.Treeview",
-            background=WHITE,
-            foreground=TEXT,
-            rowheight=39,
-            fieldbackground=WHITE,
-            font=("Segoe UI", 10)
-        )
-
-        style.configure(
-            "Contract.Treeview.Heading",
-            background="#E8EEF9",
-            foreground=NAVY,
-            font=("Segoe UI", 9, "bold"),
-            padding=11
-        )
-
-        style.map(
-            "Contract.Treeview",
-            background=[("selected", "#BFDBFE")],
-            foreground=[("selected", NAVY)]
-        )
-
-        columns = (
-            "MaHD",
-            "HoTen",
-            "TenPhong",
-            "NgayBatDau",
-            "NgayKetThuc",
-            "TrangThai"
-        )
-
-        self.tree = ttk.Treeview(
-            table_box,
-            columns=columns,
-            show="headings",
-            style="Contract.Treeview",
-            selectmode="browse"
-        )
-
-        headings = [
-            ("MaHD", "MÃ HỢP ĐỒNG", 100),
-            ("HoTen", "HỌ TÊN SINH VIÊN", 220),
-            ("TenPhong", "PHÒNG", 110),
-            ("NgayBatDau", "NGÀY BẮT ĐẦU", 140),
-            ("NgayKetThuc", "NGÀY KẾT THÚC", 140),
-            ("TrangThai", "TRẠNG THÁI", 130)
-        ]
-
-        for key, title, width in headings:
-            self.tree.heading(key, text=title)
-            self.tree.column(
-                key,
-                width=width,
-                minwidth=70,
-                anchor="center"
-            )
-
-        scrollbar_y = ttk.Scrollbar(
-            table_box,
-            orient="vertical",
-            command=self.tree.yview
-        )
-
-        scrollbar_x = ttk.Scrollbar(
-            table_box,
-            orient="horizontal",
-            command=self.tree.xview
-        )
-
-        self.tree.configure(
-            yscrollcommand=scrollbar_y.set,
-            xscrollcommand=scrollbar_x.set
-        )
-
-        self.tree.pack(side="top", fill="both", expand=True)
-        scrollbar_y.pack(side="right", fill="y")
-        scrollbar_x.pack(side="bottom", fill="x")
-
-        self.tree.tag_configure("odd", background="#F8FAFC")
-        self.tree.tag_configure("even", background=WHITE)
-        self.tree.tag_configure("active", foreground=GREEN)
-        self.tree.tag_configure("ended", foreground=ORANGE)
-
-        self.tree.bind(
-            "<<TreeviewSelect>>",
-            self.select_row
-        )
-
-        self.status = tk.Label(
-            self,
-            text="Sẵn sàng",
-            bg=BG,
-            fg=MUTED,
-            font=("Segoe UI", 9)
-        )
-        self.status.pack(anchor="w", padx=22, pady=(0, 5))
-
-    def make_button(self, parent, text, bg, fg, command):
-        tk.Button(
-            parent,
-            text=text,
-            command=command,
-            bg=bg,
-            fg=fg,
-            relief="flat",
-            padx=15,
-            pady=9,
-            font=("Segoe UI", 9, "bold"),
-            cursor="hand2",
-            activebackground=bg,
-            activeforeground=fg
-        ).pack(side="left", padx=(0, 8))
-
-    def select_row(self, event=None):
-        selected = self.tree.selection()
-        self.selected_id = int(selected[0]) if selected else None
-
-    def rows(self, kw):
-        like = f"%{kw}%"
-
-        return db.query("""
-            SELECT h.MaHD, s.HoTen, p.TenPhong,
-                   h.NgayBatDau, h.NgayKetThuc, h.TrangThai
-            FROM HopDong h
-            JOIN SinhVien s ON s.MaSV=h.MaSV
-            JOIN Phong p ON p.MaPhong=h.MaPhong
-            WHERE s.HoTen LIKE ?
-            OR p.TenPhong LIKE ?
-            OR h.TrangThai LIKE ?
-            OR CAST(h.MaHD AS TEXT) LIKE ?
-            ORDER BY h.MaHD DESC
-        """, (like, like, like, like))
-
-    def refresh(self):
-        rows = self.rows(self.search_var.get().strip())
-
-        self.tree.delete(*self.tree.get_children())
-
-        for i, r in enumerate(rows):
-            values = (
-                r["MaHD"],
-                r["HoTen"],
-                r["TenPhong"],
-                r["NgayBatDau"],
-                r["NgayKetThuc"],
-                r["TrangThai"]
-            )
-
-            if r["TrangThai"] == "Đang thuê":
-                tag = "active"
-            elif r["TrangThai"] == "Đã kết thúc":
-                tag = "ended"
-            else:
-                tag = "odd" if i % 2 else "even"
-
-            self.tree.insert(
-                "",
-                "end",
-                iid=str(r["MaHD"]),
-                values=values,
-                tags=(tag,)
-            )
-
-        total = db.query("""
-            SELECT
-                COUNT(*) AS Tong,
-                SUM(CASE WHEN TrangThai='Đang thuê' THEN 1 ELSE 0 END) AS DangThue,
-                SUM(CASE WHEN TrangThai='Đã kết thúc' THEN 1 ELSE 0 END) AS DaKetThuc
-            FROM HopDong
-        """, one=True)
-
-        sinh_vien = db.query("""
-            SELECT COUNT(DISTINCT MaSV)
-            FROM HopDong
-            WHERE TrangThai='Đang thuê'
-        """, one=True)[0]
-
-        self.card_values["TỔNG HỢP ĐỒNG"].config(
-            text=str(total["Tong"] or 0)
-        )
-
-        self.card_values["ĐANG THUÊ"].config(
-            text=str(total["DangThue"] or 0)
-        )
-
-        self.card_values["ĐÃ KẾT THÚC"].config(
-            text=str(total["DaKetThuc"] or 0)
-        )
-
-        self.card_values["SINH VIÊN ĐANG Ở"].config(
-            text=str(sinh_vien)
-        )
-
-        self.status.config(
-            text=f"Đang hiển thị {len(rows)} hợp đồng"
-        )
-
-        self.selected_id = None
-
-    def open_form(self, fields, values=None):
-        win = tk.Toplevel(self)
-        win.title("Tạo hợp đồng thuê phòng")
-        win.geometry("570x450")
-        win.resizable(False, False)
-        win.configure(bg=BG)
-        win.transient(self.winfo_toplevel())
-        win.grab_set()
-
-        header = tk.Frame(
-            win,
-            bg=NAVY,
-            padx=25,
-            pady=20
-        )
-        header.pack(fill="x")
-
-        tk.Label(
-            header,
-            text="TẠO HỢP ĐỒNG MỚI",
-            bg=NAVY,
-            fg=WHITE,
-            font=("Segoe UI", 18, "bold")
-        ).pack(anchor="w")
-
-        tk.Label(
-            header,
-            text="Điền thông tin sinh viên và thời hạn thuê phòng",
-            bg=NAVY,
-            fg="#BFDBFE",
-            font=("Segoe UI", 9)
-        ).pack(anchor="w", pady=(5, 0))
-
-        body = tk.Frame(
-            win,
-            bg=WHITE,
-            padx=25,
-            pady=20
-        )
-        body.pack(fill="both", expand=True, padx=15, pady=15)
-
-        widgets = {}
-        values = values or {}
-
-        for i, (key, label, kind, options) in enumerate(fields):
-            tk.Label(
-                body,
-                text=label,
-                bg=WHITE,
-                fg=TEXT,
-                font=("Segoe UI", 10, "bold")
-            ).grid(row=i, column=0, sticky="w", pady=11)
-
-            if kind == "combo":
-                widget = ttk.Combobox(
-                    body,
-                    values=options,
-                    state="readonly",
-                    width=35,
-                    font=("Segoe UI", 10)
-                )
-                widget.set(values.get(key) or (options[0] if options else ""))
-            else:
-                widget = ttk.Entry(
-                    body,
-                    width=37,
-                    font=("Segoe UI", 10)
-                )
-                widget.insert(0, str(values.get(key, "")))
-
-            widget.grid(
-                row=i,
-                column=1,
-                padx=(15, 0),
-                pady=11,
-                ipady=5
-            )
-
-            widgets[key] = widget
-
-        result = {}
-
-        def save(event=None):
-            result.update({
-                key: widget.get().strip()
-                for key, widget in widgets.items()
-            })
-            win.destroy()
-
-        buttons = tk.Frame(body, bg=WHITE)
-        buttons.grid(
-            row=len(fields),
-            column=0,
-            columnspan=2,
-            sticky="e",
-            pady=(20, 0)
-        )
-
-        tk.Button(
-            buttons,
-            text="Hủy",
-            command=win.destroy,
-            bg="#E2E8F0",
-            fg=TEXT,
-            relief="flat",
-            padx=20,
-            pady=9
-        ).pack(side="left", padx=5)
-
-        tk.Button(
-            buttons,
-            text="Lưu hợp đồng",
-            command=save,
-            bg=BLUE,
-            fg=WHITE,
-            relief="flat",
-            padx=20,
-            pady=9,
-            font=("Segoe UI", 9, "bold")
-        ).pack(side="left", padx=5)
-
-        win.bind("<Return>", save)
-        win.bind("<Escape>", lambda e: win.destroy())
-        win.wait_window()
-
-        return result or None
-
-    def add(self):
-        svs = [
-            f"{r['MaSV']} - {r['HoTen']}"
-            for r in db.query("""
-                SELECT MaSV, HoTen
-                FROM SinhVien
-                WHERE MaSV NOT IN (
-                    SELECT MaSV
-                    FROM HopDong
-                    WHERE TrangThai='Đang thuê'
-                )
-                ORDER BY HoTen
-            """)
-        ]
-
-        phongs = [
-            f"{p['MaPhong']} - {p['TenPhong']} "
-            f"(còn {p['SoGiuong'] - p['DangO']} chỗ)"
-            for p in db.danh_sach_phong()
-            if p["TinhTrang"] in ("Trống", "Còn chỗ")
-        ]
-
-        if not svs:
-            return messagebox.showwarning(
-                "Thông báo",
-                "Không có sinh viên nào chưa có phòng."
-            )
-
-        if not phongs:
-            return messagebox.showwarning(
-                "Thông báo",
-                "Hiện không còn phòng trống."
-            )
-
-        fields = [
-            ("SV", "Chọn sinh viên", "combo", svs),
-            ("Phong", "Chọn phòng còn chỗ", "combo", phongs),
-            ("NgayBatDau", "Ngày bắt đầu (dd/mm/yyyy)", "entry", None),
-            ("NgayKetThuc", "Ngày kết thúc (dd/mm/yyyy)", "entry", None)
-        ]
-
-        d = self.open_form(
-            fields,
-            {
-                "NgayBatDau": date.today().strftime("%d/%m/%Y")
-            }
-        )
-
-        if not d:
-            return
-
-        try:
-            bat_dau = datetime.strptime(
-                d["NgayBatDau"],
-                "%d/%m/%Y"
-            )
-
-            ket_thuc = datetime.strptime(
-                d["NgayKetThuc"],
-                "%d/%m/%Y"
-            )
-
-            if ket_thuc <= bat_dau:
-                raise ValueError
-
-        except ValueError:
-            return messagebox.showerror(
-                "Ngày không hợp lệ",
-                "Ngày phải đúng dạng dd/mm/yyyy và ngày kết thúc phải sau ngày bắt đầu."
-            )
-
-        ma_sv = pick_id(d["SV"])
-        ma_phong = pick_id(d["Phong"])
-
-        current_student = db.query("""
-            SELECT COUNT(*)
-            FROM HopDong
-            WHERE MaSV=? AND TrangThai='Đang thuê'
-        """, (ma_sv,), one=True)[0]
-
-        if current_student:
-            return messagebox.showerror(
-                "Không thể tạo hợp đồng",
-                "Sinh viên này đã có hợp đồng đang thuê."
-            )
-
-        room = next(
-            (p for p in db.danh_sach_phong() if p["MaPhong"] == ma_phong),
-            None
-        )
-
-        if (
-            room is None
-            or room["TinhTrang"] not in ("Trống", "Còn chỗ")
-            or room["DangO"] >= room["SoGiuong"]
-        ):
-            return messagebox.showerror(
-                "Phòng không còn chỗ",
-                "Vui lòng chọn phòng khác."
-            )
-
-        db.execute("""
-            INSERT INTO HopDong(
-                MaSV, MaPhong, NgayBatDau, NgayKetThuc
-            )
-            VALUES(?,?,?,?)
-        """, (
-            ma_sv,
-            ma_phong,
-            d["NgayBatDau"],
-            d["NgayKetThuc"]
-        ))
-
-        messagebox.showinfo(
-            "Thành công",
-            "Đã tạo hợp đồng thuê phòng thành công!"
-        )
-
-        self.refresh()
-
-    def ket_thuc(self):
-        selected = self.tree.selection()
-
-        if not selected:
-            return messagebox.showwarning(
-                "Thông báo",
-                "Vui lòng chọn hợp đồng cần kết thúc."
-            )
-
-        id_ = int(selected[0])
-
-        row = db.query(
-            "SELECT TrangThai FROM HopDong WHERE MaHD=?",
-            (id_,),
-            one=True
-        )
-
-        if not row or row["TrangThai"] != "Đang thuê":
-            return messagebox.showinfo(
-                "Thông báo",
-                "Hợp đồng này đã kết thúc."
-            )
-
-        if messagebox.askyesno(
-            "Xác nhận kết thúc",
-            "Bạn có chắc chắn muốn kết thúc hợp đồng này và trả phòng?"
-        ):
-            db.execute("""
-                UPDATE HopDong
-                SET TrangThai='Đã kết thúc',
-                    NgayKetThuc=?
-                WHERE MaHD=?
-            """, (
-                date.today().strftime("%d/%m/%Y"),
-                id_
-            ))
-
-            messagebox.showinfo(
-                "Thành công",
-                "Đã kết thúc hợp đồng và cập nhật trạng thái phòng!"
-            )
-
-            self.refresh()
-
-    def delete(self):
-        selected = self.tree.selection()
-
-        if not selected:
-            return messagebox.showwarning(
-                "Thông báo",
-                "Vui lòng chọn hợp đồng cần xóa."
-            )
-
-        id_ = int(selected[0])
-
-        if messagebox.askyesno(
-            "Xác nhận xóa",
-            "Bạn có chắc chắn muốn xóa hợp đồng này không?"
-        ):
-            try:
-                db.execute(
-                    "DELETE FROM HopDong WHERE MaHD=?",
-                    (id_,)
-                )
-
-                self.refresh()
-
-            except Exception:
-                messagebox.showerror(
-                    "Không thể xóa",
-                    "Hợp đồng đang được sử dụng hoặc có dữ liệu liên quan."
-                )
+class HoaDonScreen(ttk.Frame):
+  title = "Quản lý hóa đơn"
+
+  def __init__(self, master, user=None):
+    super().__init__(master)
+    self.user = user
+
+    self.colors = {
+        "bg": "#f8fafc",
+        "white": "#ffffff",
+        "text_dark": "#0f172a",
+        "text_main": "#1e293b",
+        "muted": "#64748b",
+        "blue_primary": "#1d4ed8",
+        "blue_hover": "#1e40af",
+        "blue_light": "#eff6ff",
+        "border": "#e2e8f0",
+    }
+
+    self.configure(style="Main.TFrame")
+    self.setup_styles()
+    self.build_ui()
+    self.refresh()
+
+  def setup_styles(self):
+    style = ttk.Style()
+    style.configure("Main.TFrame", background=self.colors["bg"])
+
+    style.configure(
+        "Custom.Treeview",
+        background=self.colors["white"],
+        fieldbackground=self.colors["white"],
+        foreground=self.colors["text_main"],
+        rowheight=48,
+        font=("Segoe UI", 10),
+        borderwidth=0,
+    )
+    style.configure(
+        "Custom.Treeview.Heading",
+        background="#f8fafc",
+        foreground="#475569",
+        font=("Segoe UI", 10, "bold"),
+        relief="flat",
+        padding=8,
+    )
+    style.map(
+        "Custom.Treeview",
+        background=[("selected", "#e0e7ff")],
+        foreground=[("selected", self.colors["blue_primary"])],
+    )
+
+  def build_ui(self):
+    # Khung nội dung chính (Đã lược bỏ sidebar trùng lặp để không bị lỗi trắng màn hình)
+    content_area = tk.Frame(self, bg=self.colors["bg"])
+    content_area.pack(fill="both", expand=True)
+
+    top_bar = tk.Frame(content_area, bg=self.colors["bg"])
+    top_bar.pack(fill="x", padx=28, pady=(22, 16))
+
+    title_box = tk.Frame(top_bar, bg=self.colors["bg"])
+    title_box.pack(side="left")
+    tk.Label(
+        title_box,
+        text="Quản lý hóa đơn",
+        font=("Segoe UI", 22, "bold"),
+        fg=self.colors["text_dark"],
+        bg=self.colors["bg"],
+    ).pack(anchor="w")
+    tk.Label(
+        title_box,
+        text="Theo dõi, quản lý và xuất hóa đơn cho sinh viên",
+        font=("Segoe UI", 11),
+        fg=self.colors["muted"],
+        bg=self.colors["bg"],
+    ).pack(anchor="w", pady=(2, 0))
+
+    self.search_var = tk.StringVar()
+    search_entry = tk.Entry(
+        top_bar,
+        textvariable=self.search_var,
+        font=("Segoe UI", 10),
+        relief="solid",
+        bd=1,
+        width=30,
+        fg=self.colors["muted"],
+    )
+    search_entry.pack(side="right", ipady=8, padx=(10, 0))
+    search_entry.insert(0, "🔍 Tìm theo mã hóa đơn, tên sinh viên...")
+    search_entry.bind("<Return>", lambda e: self.refresh())
+
+    self.build_statistics(content_area)
+    self.build_filter(content_area)
+    self.build_actions(content_area)
+    self.build_table(content_area)
+
+  def build_statistics(self, parent):
+    stats = tk.Frame(parent, bg=self.colors["bg"])
+    stats.pack(fill="x", padx=28, pady=(0, 16))
+
+    self.stat_values = {}
+    items = [
+        ("total", "Tổng hóa đơn", "125", "#3b82f6", "#eff6ff"),
+        ("paid", "Đã thanh toán", "98", "#10b981", "#ecfdf5"),
+        ("unpaid", "Chưa thanh toán", "27", "#f59e0b", "#fffbeb"),
+        ("revenue", "Tổng doanh thu", "78.500.000đ", "#3b82f6", "#eff6ff"),
+    ]
+
+    for key, label, value, color, icon_bg in items:
+      card = tk.Frame(
+          stats,
+          bg=self.colors["white"],
+          highlightbackground=self.colors["border"],
+          highlightthickness=1,
+      )
+      card.pack(side="left", fill="both", expand=True, padx=(0, 14))
+
+      icon_lbl = tk.Label(
+          card,
+          text={
+              "total": "📄",
+              "paid": "✓",
+              "unpaid": "⏱",
+              "revenue": "💰",
+          }[key],
+          font=("Segoe UI", 15),
+          bg=icon_bg,
+          fg=color,
+          width=3,
+          height=2,
+      )
+      icon_lbl.pack(side="left", padx=14, pady=14)
+
+      text_area = tk.Frame(card, bg=self.colors["white"])
+      text_area.pack(side="left", fill="both", expand=True, pady=12)
+
+      tk.Label(
+          text_area,
+          text=label,
+          font=("Segoe UI", 10),
+          bg=self.colors["white"],
+          fg=self.colors["muted"],
+      ).pack(anchor="w")
+
+      val_lbl = tk.Label(
+          text_area,
+          text=value,
+          font=("Segoe UI", 18, "bold"),
+          bg=self.colors["white"],
+          fg=color,
+      )
+      val_lbl.pack(anchor="w", pady=(2, 0))
+      self.stat_values[key] = val_lbl
+
+  def build_filter(self, parent):
+    box = tk.Frame(
+        parent,
+        bg=self.colors["white"],
+        highlightbackground=self.colors["border"],
+        highlightthickness=1,
+    )
+    box.pack(fill="x", padx=28, pady=(0, 16))
+
+    tk.Label(
+        box,
+        text="Thời gian",
+        font=("Segoe UI", 10, "bold"),
+        bg=self.colors["white"],
+        fg=self.colors["text_dark"],
+    ).grid(row=0, column=0, padx=16, pady=(14, 4), sticky="w")
+
+    f_time = tk.Frame(box, bg=self.colors["white"])
+    f_time.grid(row=1, column=0, padx=16, pady=(0, 14), sticky="w")
+
+    self.from_var = tk.StringVar(value="01/11/2025")
+    self.to_var = tk.StringVar(value="30/11/2025")
+
+    ttk.Entry(f_time, textvariable=self.from_var, width=13).pack(side="left")
+    tk.Label(
+        f_time, text=" → ", bg=self.colors["white"], fg=self.colors["muted"]
+    ).pack(side="left")
+    ttk.Entry(f_time, textvariable=self.to_var, width=13).pack(side="left")
+
+    tk.Label(
+        box,
+        text="Trạng thái",
+        font=("Segoe UI", 10, "bold"),
+        bg=self.colors["white"],
+        fg=self.colors["text_dark"],
+    ).grid(row=0, column=1, padx=16, pady=(14, 4), sticky="w")
+
+    self.status_var = tk.StringVar(value="Tất cả")
+    status_cb = ttk.Combobox(
+        box,
+        textvariable=self.status_var,
+        values=["Tất cả", "Đã thanh toán", "Chưa thanh toán"],
+        state="readonly",
+        width=18,
+    )
+    status_cb.grid(row=1, column=1, padx=16, pady=(0, 14), sticky="w")
+
+    tk.Label(
+        box,
+        text="Loại hóa đơn",
+        font=("Segoe UI", 10, "bold"),
+        bg=self.colors["white"],
+        fg=self.colors["text_dark"],
+    ).grid(row=0, column=2, padx=16, pady=(14, 4), sticky="w")
+
+    self.type_var = tk.StringVar(value="Tất cả")
+    type_cb = ttk.Combobox(
+        box,
+        textvariable=self.type_var,
+        values=["Tất cả", "Tiền phòng", "Dịch vụ khác"],
+        state="readonly",
+        width=18,
+    )
+    type_cb.grid(row=1, column=2, padx=16, pady=(0, 14), sticky="w")
+
+    btn_box = tk.Frame(box, bg=self.colors["white"])
+    btn_box.grid(row=1, column=3, padx=16, pady=(0, 14), sticky="w")
+
+    tk.Button(
+        btn_box,
+        text="🔍 Tìm kiếm",
+        font=("Segoe UI", 10, "bold"),
+        bg=self.colors["blue_primary"],
+        fg="white",
+        activebackground=self.colors["blue_hover"],
+        activeforeground="white",
+        relief="flat",
+        padx=12,
+        pady=6,
+        command=self.refresh,
+    ).pack(side="left", padx=(0, 8))
+
+    tk.Button(
+        btn_box,
+        text="🔄 Làm mới",
+        font=("Segoe UI", 10, "bold"),
+        bg=self.colors["white"],
+        fg="#334155",
+        activebackground="#f1f5f9",
+        activeforeground="#334155",
+        relief="solid",
+        bd=1,
+        padx=10,
+        pady=5,
+        command=self.reset_filter,
+    ).pack(side="left")
+
+  def build_actions(self, parent):
+    bar = tk.Frame(parent, bg=self.colors["bg"])
+    bar.pack(fill="x", padx=28, pady=(0, 14))
+
+    left_act = tk.Frame(bar, bg=self.colors["bg"])
+    left_act.pack(side="left")
+
+    tk.Button(
+        left_act,
+        text="＋ Tạo hóa đơn",
+        font=("Segoe UI", 10, "bold"),
+        bg=self.colors["blue_primary"],
+        fg="white",
+        activebackground=self.colors["blue_hover"],
+        activeforeground="white",
+        relief="flat",
+        padx=14,
+        pady=7,
+        command=self.add,
+    ).pack(side="left", padx=(0, 8))
+
+    for text_btn in ["📊 Xuất Excel", "📄 Xuất PDF", "🖨️ In hóa đơn"]:
+      tk.Button(
+          left_act,
+          text=text_btn,
+          font=("Segoe UI", 10, "bold"),
+          bg=self.colors["white"],
+          fg="#334155",
+          activebackground="#f1f5f9",
+          activeforeground="#334155",
+          relief="solid",
+          bd=1,
+          padx=10,
+          pady=6,
+      ).pack(side="left", padx=4)
+
+    right_act = tk.Frame(bar, bg=self.colors["bg"])
+    right_act.pack(side="right")
+    tk.Button(
+        right_act,
+        text="📊 Xem báo cáo",
+        font=("Segoe UI", 10, "bold"),
+        bg=self.colors["white"],
+        fg="#334155",
+        activebackground="#f1f5f9",
+        activeforeground="#334155",
+        relief="solid",
+        bd=1,
+        padx=10,
+        pady=6,
+    ).pack(side="right")
+
+  def build_table(self, parent):
+    container = tk.Frame(
+        parent,
+        bg=self.colors["white"],
+        highlightbackground=self.colors["border"],
+        highlightthickness=1,
+    )
+    container.pack(fill="both", expand=True, padx=28, pady=(0, 12))
+
+    columns = (
+        "Check",
+        "MaHDon",
+        "TenSinhVien",
+        "Phong",
+        "LoaiPhi",
+        "SoTien",
+        "NgayLap",
+        "HanThanhToan",
+        "TrangThai",
+        "ThaoTac",
+    )
+
+    self.tree = ttk.Treeview(
+        container,
+        columns=columns,
+        show="headings",
+        style="Custom.Treeview",
+        selectmode="browse",
+    )
+
+    headings = {
+        "Check": "",
+        "MaHDon": "Mã hóa đơn",
+        "TenSinhVien": "Tên sinh viên",
+        "Phong": "Phòng",
+        "LoaiPhi": "Loại phí",
+        "SoTien": "Số tiền",
+        "NgayLap": "Ngày lập",
+        "HanThanhToan": "Hạn thanh toán",
+        "TrangThai": "Trạng thái",
+        "ThaoTac": "Thao tác",
+    }
+
+    widths = {
+        "Check": 40,
+        "MaHDon": 105,
+        "TenSinhVien": 160,
+        "Phong": 90,
+        "LoaiPhi": 120,
+        "SoTien": 130,
+        "NgayLap": 115,
+        "HanThanhToan": 125,
+        "TrangThai": 140,
+        "ThaoTac": 110,
+    }
+
+    for col in columns:
+      self.tree.heading(col, text=headings[col])
+      self.tree.column(
+          col,
+          width=widths[col],
+          anchor="w"
+          if col in ["TenSinhVien", "LoaiPhi"]
+          else "center",
+      )
+
+    scrollbar_y = ttk.Scrollbar(
+        container, orient="vertical", command=self.tree.yview
+    )
+    self.tree.configure(yscrollcommand=scrollbar_y.set)
+    self.tree.pack(side="top", fill="both", expand=True)
+    scrollbar_y.pack(side="right", fill="y")
+
+    pagination = tk.Frame(parent, bg=self.colors["bg"])
+    pagination.pack(fill="x", padx=28, pady=(4, 16))
+
+    tk.Label(
+        pagination,
+        text="Hiển thị 1 - 5 / 125 hóa đơn",
+        font=("Segoe UI", 10),
+        fg=self.colors["muted"],
+        bg=self.colors["bg"],
+    ).pack(side="left")
+
+    pages_box = tk.Frame(pagination, bg=self.colors["bg"])
+    pages_box.pack(side="right")
+
+    for p in ["<", "1", "2", "3", "...", "25", ">"]:
+      is_active = p == "1"
+      tk.Button(
+          pages_box,
+          text=p,
+          font=("Segoe UI", 10, "bold" if is_active else "normal"),
+          bg=self.colors["blue_primary"]
+          if is_active
+          else self.colors["white"],
+          fg="white" if is_active else self.colors["text_main"],
+          relief="solid",
+          bd=1,
+          width=3,
+          height=1,
+      ).pack(side="left", padx=2)
+
+  def reset_filter(self):
+    self.search_var.set("")
+    self.from_var.set("01/11/2025")
+    self.to_var.set("30/11/2025")
+    self.status_var.set("Tất cả")
+    self.type_var.set("Tất cả")
+    self.refresh()
+
+  def rows(self):
+    return [
+        (
+            "☐",
+            "HD00125",
+            "Nguyễn Thị An",
+            "A101",
+            "Tiền phòng",
+            "2.000.000đ",
+            "01/11/2025",
+            "10/11/2025",
+            "✓ Đã thanh toán",
+            "👁 Xem  ...",
+        ),
+        (
+            "☐",
+            "HD00124",
+            "Trần Văn Bình",
+            "B201",
+            "Tiền phòng",
+            "1.800.000đ",
+            "01/11/2025",
+            "10/11/2025",
+            "✓ Đã thanh toán",
+            "👁 Xem  ...",
+        ),
+        (
+            "☐",
+            "HD00123",
+            "Lê Thị Mai",
+            "B102",
+            "Dịch vụ khác",
+            "150.000đ",
+            "29/10/2025",
+            "05/11/2025",
+            "⏱ Chưa thanh toán",
+            "👁 Xem  ...",
+        ),
+        (
+            "☐",
+            "HD00122",
+            "Phạm Văn Duy",
+            "A201",
+            "Tiền phòng",
+            "2.200.000đ",
+            "28/10/2025",
+            "07/11/2025",
+            "⏱ Chưa thanh toán",
+            "👁 Xem  ...",
+        ),
+        (
+            "☐",
+            "HD00121",
+            "Hoàng Thị Lan",
+            "C102",
+            "Dịch vụ khác",
+            "200.000đ",
+            "27/10/2025",
+            "05/11/2025",
+            "✓ Đã thanh toán",
+            "👁 Xem  ...",
+        ),
+    ]
+
+  def refresh(self):
+    self.tree.delete(*self.tree.get_children())
+    for r in self.rows():
+      self.tree.insert("", "end", values=r)
+
+  def add(self):
+    win = tk.Toplevel(self)
+    win.title("Lập hóa đơn mới")
+    win.geometry("520x650")
+    win.configure(bg=self.colors["white"])
+    win.resizable(False, False)
+    win.transient(self.winfo_toplevel())
+    win.grab_set()
+
+    header = tk.Frame(win, bg=self.colors["white"])
+    header.pack(fill="x", padx=24, pady=(20, 12))
+
+    tk.Label(
+        header,
+        text="Lập hóa đơn mới",
+        font=("Segoe UI", 16, "bold"),
+        fg=self.colors["text_dark"],
+        bg=self.colors["white"],
+    ).pack(side="left")
+
+    tk.Button(
+        header,
+        text="✕",
+        font=("Segoe UI", 10, "bold"),
+        bg="#f1f5f9",
+        fg=self.colors["muted"],
+        relief="flat",
+        width=3,
+        command=win.destroy,
+    ).pack(side="right")
+
+    body = tk.Frame(win, bg=self.colors["white"])
+    body.pack(fill="both", expand=True, padx=24, pady=10)
+
+    tk.Label(
+        body,
+        text="🏠  Thông tin hóa đơn",
+        font=("Segoe UI", 11, "bold"),
+        fg=self.colors["blue_primary"],
+        bg=self.colors["white"],
+        anchor="w",
+    ).pack(fill="x", pady=(0, 6))
+
+    f_info = tk.Frame(body, bg=self.colors["white"])
+    f_info.pack(fill="x", pady=(0, 12))
+
+    tk.Label(
+        f_info, text="Phòng *", font=("Segoe UI", 10), bg=self.colors["white"]
+    ).grid(row=0, column=0, sticky="w", pady=(0, 2))
+    room_cb = ttk.Combobox(
+        f_info, values=["A101 - Phòng 4 người", "A102 - Phòng 4 người"], width=28
+    )
+    room_cb.grid(row=1, column=0, sticky="w", padx=(0, 16))
+    room_cb.current(0)
+
+    tk.Label(
+        f_info, text="Tháng hóa đơn *", font=("Segoe UI", 10), bg="white"
+    ).grid(row=0, column=1, sticky="w", pady=(0, 2))
+    month_en = ttk.Entry(f_info, width=22)
+    month_en.insert(0, "11/2025")
+    month_en.grid(row=1, column=1, sticky="w")
+
+    tk.Label(
+        body,
+        text="⚡  Chỉ số sử dụng",
+        font=("Segoe UI", 11, "bold"),
+        fg=self.colors["blue_primary"],
+        bg=self.colors["white"],
+        anchor="w",
+    ).pack(fill="x", pady=(6, 6))
+
+    f_idx = tk.Frame(body, bg=self.colors["white"])
+    f_idx.pack(fill="x", pady=(0, 12))
+
+    tk.Label(
+        f_idx, text="Số điện cũ (kWh)", font=("Segoe UI", 9), bg="white"
+    ).grid(row=0, column=0, sticky="w")
+    old_e = ttk.Entry(f_idx, width=24)
+    old_e.insert(0, "100")
+    old_e.config(state="disabled")
+    old_e.grid(row=1, column=0, sticky="w", pady=(2, 8), padx=(0, 16))
+
+    tk.Label(
+        f_idx, text="Số nước cũ (m³)", font=("Segoe UI", 9), bg="white"
+    ).grid(row=0, column=1, sticky="w")
+    old_w = ttk.Entry(f_idx, width=24)
+    old_w.insert(0, "20")
+    old_w.config(state="disabled")
+    old_w.grid(row=1, column=1, sticky="w", pady=(2, 8))
+
+    tk.Label(
+        f_idx, text="Số điện mới (kWh) *", font=("Segoe UI", 9), bg="white"
+    ).grid(row=2, column=0, sticky="w")
+    new_e = ttk.Entry(f_idx, width=24)
+    new_e.insert(0, "150")
+    new_e.grid(row=3, column=0, sticky="w", pady=(2, 0), padx=(0, 16))
+
+    tk.Label(
+        f_idx, text="Số nước mới (m³) *", font=("Segoe UI", 9), bg="white"
+    ).grid(row=2, column=1, sticky="w")
+    new_w = ttk.Entry(f_idx, width=24)
+    new_w.insert(0, "25")
+    new_w.grid(row=3, column=1, sticky="w", pady=(2, 0))
+
+    tk.Label(
+        body,
+        text="💳  Chi tiết thanh toán",
+        font=("Segoe UI", 11, "bold"),
+        fg=self.colors["blue_primary"],
+        bg=self.colors["white"],
+        anchor="w",
+    ).pack(fill="x", pady=(8, 6))
+
+    detail_frame = tk.Frame(
+        body,
+        bg=self.colors["white"],
+        highlightbackground=self.colors["border"],
+        highlightthickness=1,
+    )
+    detail_frame.pack(fill="x", pady=(0, 10))
+
+    sub_tree = ttk.Treeview(
+        detail_frame, columns=("KhoanThu", "ThanhTien"), show="headings", height=4
+    )
+    sub_tree.heading("KhoanThu", text="Khoản thu")
+    sub_tree.heading("ThanhTien", text="Thành tiền")
+    sub_tree.column("KhoanThu", width=260, anchor="w")
+    sub_tree.column("ThanhTien", width=180, anchor="e")
+    sub_tree.pack(fill="x", padx=4, pady=4)
+
+    sub_rows = [
+        ("🏠 Tiền phòng", "600.000đ"),
+        ("⚡ Tiền điện (50 kWh × 3.000đ)", "150.000đ"),
+        ("💧 Tiền nước (5 m³ × 10.000đ)", "50.000đ"),
+        ("🛍️ Dịch vụ khác", "0đ"),
+    ]
+    for r in sub_rows:
+      sub_tree.insert("", "end", values=r)
+
+    tot_box = tk.Frame(body, bg=self.colors["white"])
+    tot_box.pack(fill="x", pady=(4, 10))
+    tk.Label(
+        tot_box,
+        text="Tổng tiền",
+        font=("Segoe UI", 11, "bold"),
+        bg="white",
+        fg=self.colors["text_dark"],
+    ).pack(side="left")
+    tk.Label(
+        tot_box,
+        text="800.000đ",
+        font=("Segoe UI", 13, "bold"),
+        bg="white",
+        fg=self.colors["blue_primary"],
+    ).pack(side="right")
+
+    footer = tk.Frame(win, bg=self.colors["white"])
+    footer.pack(fill="x", padx=24, pady=(0, 20))
+
+    tk.Button(
+        footer,
+        text="Hủy",
+        font=("Segoe UI", 10, "bold"),
+        bg=self.colors["white"],
+        fg="#334155",
+        activebackground="#f1f5f9",
+        relief="solid",
+        bd=1,
+        padx=12,
+        pady=6,
+        command=win.destroy,
+    ).pack(side="right", padx=(8, 0))
+
+    tk.Button(
+        footer,
+        text="💾 Lưu hóa đơn",
+        font=("Segoe UI", 10, "bold"),
+        bg=self.colors["blue_primary"],
+        fg="white",
+        activebackground=self.colors["blue_hover"],
+        activeforeground="white",
+        relief="flat",
+        padx=14,
+        pady=6,
+        command=lambda: [
+            messagebox.showinfo("Thành công", "Đã lưu hóa đơn thành công!"),
+            win.destroy(),
+        ],
+    ).pack(side="right")
