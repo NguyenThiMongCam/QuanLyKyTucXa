@@ -2,6 +2,7 @@
 import hashlib
 import os
 import sqlite3
+from datetime import datetime
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kytucxa.db")
 
@@ -35,7 +36,33 @@ CREATE TABLE IF NOT EXISTS HoaDon(
 CREATE TABLE IF NOT EXISTS NhanVien(
     MaNV INTEGER PRIMARY KEY AUTOINCREMENT, TenDangNhap TEXT NOT NULL UNIQUE,
     MatKhau TEXT NOT NULL, HoTen TEXT NOT NULL, VaiTro TEXT NOT NULL DEFAULT 'nhanvien');
+CREATE TABLE IF NOT EXISTS ThongBao(
+    MaTB INTEGER PRIMARY KEY AUTOINCREMENT, TieuDe TEXT NOT NULL, NoiDung TEXT, Ngay TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS YeuCau(
+    MaYC INTEGER PRIMARY KEY AUTOINCREMENT,
+    MaSV INTEGER NOT NULL REFERENCES SinhVien(MaSV),
+    Loai TEXT NOT NULL, NoiDung TEXT NOT NULL, NgayGui TEXT NOT NULL,
+    TrangThai TEXT NOT NULL DEFAULT 'Chờ xử lý');
+CREATE TABLE IF NOT EXISTS CauHinh(Khoa TEXT PRIMARY KEY, GiaTri TEXT);
 """
+
+# Cấu hình hiển thị cho sinh viên (sửa trực tiếp trong bảng CauHinh nếu cần)
+DEFAULT_CONFIG = {
+    "gio_mo_cong": "05:00",
+    "gio_dong_cong": "23:00",
+    "gio_yen_tinh": "22:30 - 05:00",
+    "lien_he_dien_thoai": "[SỐ ĐIỆN THOẠI]",
+    "lien_he_email": "[EMAIL KTX]",
+    "lien_he_van_phong": "[ĐỊA CHỈ / GIỜ LÀM VIỆC]",
+    "noi_quy": "\n".join([
+        "Giữ gìn vệ sinh phòng ở và khu vực chung.",
+        "Không gây ồn ào trong giờ yên tĩnh.",
+        "Không nấu ăn, không dùng thiết bị điện công suất lớn trong phòng.",
+        "Khách đến thăm phải đăng ký và rời ký túc xá trước giờ đóng cổng.",
+        "Không tự ý chuyển phòng hoặc đổi giường khi chưa được Ban quản lý đồng ý.",
+        "Báo ngay cho Ban quản lý khi phát hiện hư hỏng hoặc sự cố điện, nước.",
+    ]),
+}
 
 
 def get_conn():
@@ -96,6 +123,30 @@ def login_sinh_vien(ma_sv, password):
     return d
 
 
+def get_config(key, default=""):
+    row = query("SELECT GiaTri FROM CauHinh WHERE Khoa=?", (key,), one=True)
+    return row["GiaTri"] if row and row["GiaTri"] is not None else default
+
+
+def tao_yeu_cau(ma_sv, loai, noi_dung):
+    """Sinh viên gửi yêu cầu (loai: 'Sửa chữa' | 'Về muộn' | 'Gia hạn') tới Ban quản lý."""
+    return execute("INSERT INTO YeuCau(MaSV,Loai,NoiDung,NgayGui) VALUES(?,?,?,?)",
+                   (ma_sv, loai, noi_dung, datetime.now().strftime("%d/%m/%Y")))
+
+
+def cap_nhat_sinh_vien(ma_sv, ho_ten, sdt, que_quan):
+    """Sinh viên tự cập nhật họ tên, số điện thoại, quê quán."""
+    execute("UPDATE SinhVien SET HoTen=?, SDT=?, QueQuan=? WHERE MaSV=?", (ho_ten, sdt, que_quan, ma_sv))
+
+
+def doi_mat_khau_sinh_vien(ma_sv, mat_khau_cu, mat_khau_moi):
+    """Đổi mật khẩu sinh viên. Trả về True nếu thành công, False nếu mật khẩu cũ sai."""
+    if not login_sinh_vien(ma_sv, mat_khau_cu):
+        return False
+    execute("UPDATE SinhVien SET MatKhau=? WHERE MaSV=?", (hash_pw(mat_khau_moi), ma_sv))
+    return True
+
+
 def danh_sach_phong():
     """Danh sách phòng kèm số người đang ở và tình trạng (Trống/Còn chỗ/Đầy/Bảo trì)."""
     rows = query("""
@@ -125,6 +176,7 @@ def init_db():
     conn.commit()
     conn.close()
     _migrate()
+    _seed_content()
     if query("SELECT COUNT(*) FROM NhanVien", one=True)[0] == 0:
         _seed()
 
@@ -134,6 +186,21 @@ def _migrate():
     cols = [r["name"] for r in query("PRAGMA table_info(SinhVien)")]
     if "MatKhau" not in cols:
         execute("ALTER TABLE SinhVien ADD COLUMN MatKhau TEXT")
+
+
+def _seed_content():
+    """Nội dung mẫu cho giao diện sinh viên: thông báo + cấu hình (chỉ thêm khi còn thiếu)."""
+    if query("SELECT COUNT(*) FROM ThongBao", one=True)[0] == 0:
+        for ngay, tieu_de, noi_dung in [
+                ("01/11/2026", "Kiểm tra phòng định kỳ",
+                 "Ban quản lý kiểm tra vệ sinh và an toàn phòng ở trong tuần này."),
+                ("05/11/2026", "Đăng ký gia hạn ở ký túc xá học kỳ mới",
+                 "Mở đăng ký trực tuyến đến hết ngày 30/11. Hoàn tất ngay trên hệ thống."),
+                ("08/11/2026", "Lịch cắt nước bảo trì Khu A",
+                 "Dự kiến từ 08:00 đến 11:00 ngày 10/11. Sinh viên chủ động trữ nước.")]:
+            execute("INSERT INTO ThongBao(TieuDe,NoiDung,Ngay) VALUES(?,?,?)", (tieu_de, noi_dung, ngay))
+    for k, v in DEFAULT_CONFIG.items():
+        execute("INSERT OR IGNORE INTO CauHinh(Khoa,GiaTri) VALUES(?,?)", (k, v))
 
 
 def _seed():
