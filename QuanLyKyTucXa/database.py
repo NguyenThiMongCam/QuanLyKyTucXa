@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS Phong(
     Tang INTEGER NOT NULL, TrangThai TEXT NOT NULL DEFAULT 'Hoạt động');
 CREATE TABLE IF NOT EXISTS SinhVien(
     MaSV INTEGER PRIMARY KEY AUTOINCREMENT, HoTen TEXT NOT NULL, NgaySinh TEXT,
-    GioiTinh TEXT, Lop TEXT, SDT TEXT, QueQuan TEXT);
+    GioiTinh TEXT, Lop TEXT, SDT TEXT, QueQuan TEXT, MatKhau TEXT);
 CREATE TABLE IF NOT EXISTS HopDong(
     MaHD INTEGER PRIMARY KEY AUTOINCREMENT,
     MaSV INTEGER NOT NULL REFERENCES SinhVien(MaSV),
@@ -73,6 +73,29 @@ def login(username, password):
     return dict(row) if row else None
 
 
+DEFAULT_STUDENT_PW = "123456"  # mật khẩu mặc định của sinh viên chưa đặt mật khẩu riêng
+
+
+def login_sinh_vien(ma_sv, password):
+    """Đăng nhập sinh viên bằng mã sinh viên (MaSV).
+    Trả về dict thông tin sinh viên (kèm 'DangO' = có hợp đồng đang thuê) hoặc None nếu sai."""
+    try:
+        ma = int(str(ma_sv).strip())
+    except ValueError:
+        return None
+    row = query("SELECT * FROM SinhVien WHERE MaSV=?", (ma,), one=True)
+    if not row:
+        return None
+    stored = row["MatKhau"] or hash_pw(DEFAULT_STUDENT_PW)
+    if stored != hash_pw(password):
+        return None
+    d = dict(row)
+    d.pop("MatKhau", None)
+    d["DangO"] = query("SELECT COUNT(*) FROM HopDong WHERE MaSV=? AND TrangThai='Đang thuê'",
+                       (ma,), one=True)[0] > 0
+    return d
+
+
 def danh_sach_phong():
     """Danh sách phòng kèm số người đang ở và tình trạng (Trống/Còn chỗ/Đầy/Bảo trì)."""
     rows = query("""
@@ -101,8 +124,16 @@ def init_db():
     conn.executescript(SCHEMA)
     conn.commit()
     conn.close()
+    _migrate()
     if query("SELECT COUNT(*) FROM NhanVien", one=True)[0] == 0:
         _seed()
+
+
+def _migrate():
+    """Nâng cấp file kytucxa.db cũ: thêm cột MatKhau cho bảng SinhVien."""
+    cols = [r["name"] for r in query("PRAGMA table_info(SinhVien)")]
+    if "MatKhau" not in cols:
+        execute("ALTER TABLE SinhVien ADD COLUMN MatKhau TEXT")
 
 
 def _seed():
