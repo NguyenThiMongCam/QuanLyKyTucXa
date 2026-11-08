@@ -1,60 +1,105 @@
 
-"""Màn hình quản lý sinh viên - HUIT Blue."""
-
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import date
 
 import database as db
-from screens.base import error, valid_date, parse_date, pick_id
+from screens.base import CrudScreen, error, form_dialog, valid_date
 
 
-# ==================== HUIT BLUE BRAND THEME ====================
-# Giao diện lấy cảm hứng từ website/nhận diện HUIT:
-# xanh dương chủ đạo, xanh navy, nền trắng và xanh rất nhạt.
+# =========================================================
+# HUIT COLOR THEME
+# =========================================================
 
-HUIT_BLUE_PRIMARY = "#0B54A0"
-HUIT_BLUE_DARK = "#073B73"
-HUIT_BLUE_HOVER = "#1769AA"
-HUIT_BLUE_LIGHT = "#E8F1FB"
-HUIT_NAVY = "#12345A"
-HUIT_BLUE = "#1769AA"
+BLUE = "#1958B8"
+BLUE_DARK = "#10346D"
+BLUE_LIGHT = "#E7F0FF"
 
-BG = "#F4F7FB"
-CARD = "#FFFFFF"
-INK = "#243247"
-MUTED = "#718096"
-PRIMARY = HUIT_BLUE_PRIMARY
-BORDER = "#DFE7F0"
+BG = "#F2F6FC"
+WHITE = "#FFFFFF"
 
-SOFT_BLUE = "#EAF2FB"
-SOFT_SAGE = "#EFF5FC"
-SOFT_BEIGE = "#F3F6FA"
+TEXT = "#183153"
+MUTED = "#64748B"
+BORDER = "#DCE6F5"
 
-# Màu phân biệt giới tính, giữ nhẹ nhàng và không dùng đỏ làm màu chủ đạo
-MALE_BG = "#EAF3FC"
-MALE_FG = "#285A83"
-FEMALE_BG = "#F1EDFA"
-FEMALE_FG = "#7252A3"
-OTHER_BG = "#EEF2F7"
-OTHER_FG = "#58677A"
+GREEN = "#16834A"
+GREEN_BG = "#E2F5EA"
 
-class SinhVienScreen(ttk.Frame):
+ORANGE = "#D58A24"
+ORANGE_BG = "#FFF3DF"
+
+RED = "#D46A6A"
+RED_BG = "#FFF0F0"
+
+
+# =========================================================
+# FORM DATA
+# =========================================================
+
+FIELDS = [
+    ("HoTen", "Họ và tên", "entry", None),
+    ("NgaySinh", "Ngày sinh (dd/mm/yyyy)", "entry", None),
+    ("GioiTinh", "Giới tính", "combo", ["Nam", "Nữ"]),
+    ("Lop", "Lớp", "entry", None),
+    ("SDT", "Số điện thoại", "entry", None),
+    ("QueQuan", "Quê quán", "entry", None)
+]
+
+
+def validate(d):
+
+    if not d["HoTen"]:
+        return "Họ tên không được để trống."
+
+    if d["NgaySinh"] and not valid_date(d["NgaySinh"]):
+        return "Ngày sinh phải có dạng dd/mm/yyyy."
+
+    if d["SDT"] and not (
+        d["SDT"].isdigit() and 9 <= len(d["SDT"]) <= 11
+    ):
+        return "Số điện thoại phải gồm 9-11 chữ số."
+
+    return None
+
+
+# =========================================================
+# SINH VIEN SCREEN
+# =========================================================
+
+class SinhVienScreen(CrudScreen):
+
     title = "Quản lý sinh viên"
 
-    def __init__(self, master, user=None):
-        super().__init__(master)
+    columns = [
+        ("MaSV", "Mã SV", 90),
+        ("HoTen", "Họ và tên", 180),
+        ("NgaySinh", "Ngày sinh", 110),
+        ("GioiTinh", "Giới tính", 90),
+        ("Lop", "Lớp", 120),
+        ("SDT", "SĐT", 130),
+        ("QueQuan", "Quê quán", 140),
+        ("Phong", "Phòng đang ở", 120)
+    ]
 
-        self.user = user
-        self.configure(style="SV.TFrame")
+    def __init__(self, master, *args, **kwargs):
 
-        self._styles()
-        self._build()
+        ttk.Frame.__init__(self, master)
+
+        self.configure(style="HUIT.Main.TFrame")
+
+        self.keyword = tk.StringVar()
+        self.filter_type = tk.StringVar(value="all")
+
+        self._setup_style()
+        self._build_interface()
         self.refresh()
 
-    # ==================== CÀI ĐẶT GIAO DIỆN ====================
+    # =====================================================
+    # STYLE
+    # =====================================================
 
-    def _styles(self):
+    def _setup_style(self):
+
         style = ttk.Style(self)
 
         try:
@@ -62,107 +107,200 @@ class SinhVienScreen(ttk.Frame):
         except tk.TclError:
             pass
 
-        # Khung và nhãn tổng thể
-        style.configure("SV.TFrame", background=BG)
-        style.configure("SV.Card.TFrame", background=CARD, relief="flat", borderwidth=0)
-        style.configure("SV.TLabel", background=BG, foreground=INK, font=("Segoe UI", 10))
-        style.configure("SV.Title.TLabel", background=BG, foreground=HUIT_NAVY,
-                        font=("Segoe UI", 23, "bold"))
-        style.configure("SV.Sub.TLabel", background=BG, foreground=MUTED,
-                        font=("Segoe UI", 9))
-        style.configure("SV.CardTitle.TLabel", background=CARD, foreground=MUTED,
-                        font=("Segoe UI", 9, "bold"))
-        style.configure("SV.CardValue.TLabel", background=CARD, foreground=HUIT_BLUE_PRIMARY,
-                        font=("Segoe UI", 23, "bold"))
-
-        # Bảng dữ liệu
-        style.configure("SV.Treeview", rowheight=43, font=("Segoe UI", 9),
-                        background=CARD, fieldbackground=CARD, foreground=INK,
-                        borderwidth=0, relief="flat")
-        style.configure("SV.Treeview.Heading", font=("Segoe UI", 9, "bold"),
-                        background=HUIT_NAVY, foreground="#FFFFFF",
-                        padding=(10, 14), relief="flat")
-        style.map("SV.Treeview.Heading",
-                  background=[("active", HUIT_BLUE)],
-                  foreground=[("active", "#FFFFFF")])
-        style.map("SV.Treeview",
-                  background=[("selected", HUIT_BLUE_PRIMARY)],
-                  foreground=[("selected", "#FFFFFF")])
-
-        # Nút hành động chính
-        style.configure("SV.Primary.TButton", font=("Segoe UI", 9, "bold"),
-                        background=HUIT_BLUE_PRIMARY, foreground="#FFFFFF",
-                        padding=(16, 10), borderwidth=0, focuscolor=HUIT_BLUE_PRIMARY)
-        style.map("SV.Primary.TButton",
-                  background=[("disabled", "#A9C5E3"),
-                              ("pressed", HUIT_BLUE_DARK),
-                              ("active", HUIT_BLUE_HOVER)],
-                  foreground=[("disabled", "#FFFFFF"), ("!disabled", "#FFFFFF")])
-
-        # Nút thông thường
-        style.configure("SV.TButton", font=("Segoe UI", 9, "bold"),
-                        background=SOFT_BLUE, foreground=HUIT_NAVY,
-                        padding=(13, 9), borderwidth=0, focuscolor=SOFT_BLUE)
-        style.map("SV.TButton",
-                  background=[("pressed", "#D5E2EF"), ("active", "#DCE8F4")],
-                  foreground=[("active", HUIT_BLUE_PRIMARY)])
-
-        # Nút xóa
-        style.configure("SV.Danger.TButton", font=("Segoe UI", 9, "bold"),
-                        background="#FFF4E5", foreground="#9A5B00",
-                        padding=(13, 9), borderwidth=0)
-        style.map("SV.Danger.TButton",
-                  background=[("pressed", "#F5E4C8"), ("active", "#FCEFD9")])
-
-        # Ô nhập liệu
-        style.configure("SV.TEntry", fieldbackground="#FFFFFF", foreground=INK,
-                        insertcolor=HUIT_BLUE_PRIMARY, padding=10, bordercolor=BORDER,
-                        lightcolor=BORDER, darkcolor=BORDER)
-        style.map("SV.TEntry", bordercolor=[("focus", HUIT_BLUE_PRIMARY)],
-                  lightcolor=[("focus", HUIT_BLUE_PRIMARY)],
-                  darkcolor=[("focus", HUIT_BLUE_PRIMARY)])
-
-        # Hộp chọn
-        style.configure("SV.TCombobox", fieldbackground="#FFFFFF",
-                        background="#FFFFFF", foreground=INK, padding=9,
-                        bordercolor=BORDER, arrowcolor=HUIT_BLUE_PRIMARY)
-        style.map("SV.TCombobox",
-                  fieldbackground=[("readonly", "#FFFFFF"), ("focus", "#FFFFFF")],
-                  foreground=[("readonly", INK)],
-                  bordercolor=[("focus", HUIT_BLUE_PRIMARY)])
-
-        # Thanh cuộn
-        style.configure("Vertical.TScrollbar", background="#DCE3EC",
-                        troughcolor=BG, borderwidth=0, arrowcolor=HUIT_NAVY)
-        style.configure("Horizontal.TScrollbar", background="#DCE3EC",
-                        troughcolor=BG, borderwidth=0, arrowcolor=HUIT_NAVY)
-
-    # ==================== XÂY DỰNG GIAO DIỆN ====================
-
-    def _build(self):
-
-        wrap = ttk.Frame(
-            self,
-            style="SV.TFrame",
-            padding=(22, 18)
+        style.configure(
+            "HUIT.Main.TFrame",
+            background=BG
         )
 
-        wrap.pack(
+        style.configure(
+            "HUIT.Card.TFrame",
+            background=WHITE
+        )
+
+        style.configure(
+            "HUIT.Title.TLabel",
+            background=BG,
+            foreground=BLUE_DARK,
+            font=("Segoe UI", 23, "bold")
+        )
+
+        style.configure(
+            "HUIT.Sub.TLabel",
+            background=BG,
+            foreground=MUTED,
+            font=("Segoe UI", 10)
+        )
+
+        style.configure(
+            "HUIT.CardTitle.TLabel",
+            background=WHITE,
+            foreground=MUTED,
+            font=("Segoe UI", 9, "bold")
+        )
+
+        style.configure(
+            "HUIT.CardValue.TLabel",
+            background=WHITE,
+            foreground=BLUE,
+            font=("Segoe UI", 23, "bold")
+        )
+
+        style.configure(
+            "HUIT.Treeview",
+            background=WHITE,
+            foreground=TEXT,
+            fieldbackground=WHITE,
+            font=("Segoe UI", 10),
+            rowheight=46,
+            borderwidth=0
+        )
+
+        style.configure(
+            "HUIT.Treeview.Heading",
+            background="#F3F7FD",
+            foreground="#536783",
+            font=("Segoe UI", 10, "bold"),
+            padding=(10, 13),
+            relief="flat"
+        )
+
+        style.map(
+            "HUIT.Treeview.Heading",
+            background=[
+                ("active", BLUE_LIGHT)
+            ]
+        )
+
+        style.map(
+            "HUIT.Treeview",
+            background=[
+                ("selected", BLUE)
+            ],
+            foreground=[
+                ("selected", WHITE)
+            ]
+        )
+
+        style.configure(
+            "HUIT.Primary.TButton",
+            background=BLUE,
+            foreground=WHITE,
+            font=("Segoe UI", 10, "bold"),
+            padding=(16, 10),
+            borderwidth=0
+        )
+
+        style.map(
+            "HUIT.Primary.TButton",
+            background=[
+                ("active", "#286CCB"),
+                ("pressed", BLUE_DARK)
+            ],
+            foreground=[
+                ("active", WHITE)
+            ]
+        )
+
+        style.configure(
+            "HUIT.TButton",
+            background=WHITE,
+            foreground=BLUE_DARK,
+            font=("Segoe UI", 9, "bold"),
+            padding=(13, 9),
+            borderwidth=1,
+            relief="solid"
+        )
+
+        style.map(
+            "HUIT.TButton",
+            background=[
+                ("active", BLUE_LIGHT),
+                ("pressed", "#D6E5FC")
+            ]
+        )
+
+        style.configure(
+            "HUIT.Danger.TButton",
+            background=WHITE,
+            foreground=RED,
+            font=("Segoe UI", 9, "bold"),
+            padding=(13, 9),
+            borderwidth=1,
+            relief="solid"
+        )
+
+        style.map(
+            "HUIT.Danger.TButton",
+            background=[
+                ("active", RED_BG)
+            ]
+        )
+
+        style.configure(
+            "HUIT.TEntry",
+            fieldbackground=WHITE,
+            foreground=TEXT,
+            insertcolor=BLUE,
+            padding=10,
+            bordercolor=BORDER
+        )
+
+        style.map(
+            "HUIT.TEntry",
+            bordercolor=[
+                ("focus", BLUE)
+            ]
+        )
+
+        style.configure(
+            "HUIT.Filter.TButton",
+            background=WHITE,
+            foreground="#526581",
+            font=("Segoe UI", 9, "bold"),
+            padding=(14, 9),
+            borderwidth=1,
+            relief="solid"
+        )
+
+        style.configure(
+            "HUIT.ActiveFilter.TButton",
+            background=BLUE_LIGHT,
+            foreground=BLUE_DARK,
+            font=("Segoe UI", 9, "bold"),
+            padding=(14, 9),
+            borderwidth=1,
+            relief="solid"
+        )
+
+    # =====================================================
+    # MAIN INTERFACE
+    # =====================================================
+
+    def _build_interface(self):
+
+        container = ttk.Frame(
+            self,
+            style="HUIT.Main.TFrame",
+            padding=(26, 22)
+        )
+
+        container.pack(
             fill="both",
             expand=True
         )
 
-        # Tiêu đề
+        # HEADER
+
         header = ttk.Frame(
-            wrap,
-            style="SV.TFrame"
+            container,
+            style="HUIT.Main.TFrame"
         )
 
         header.pack(fill="x")
 
         title_box = ttk.Frame(
             header,
-            style="SV.TFrame"
+            style="HUIT.Main.TFrame"
         )
 
         title_box.pack(side="left")
@@ -170,63 +308,166 @@ class SinhVienScreen(ttk.Frame):
         ttk.Label(
             title_box,
             text="Quản lý sinh viên",
-            style="SV.Title.TLabel"
+            style="HUIT.Title.TLabel"
         ).pack(anchor="w")
 
         ttk.Label(
             title_box,
-            text="Theo dõi hồ sơ, thông tin liên hệ và tình trạng lưu trú",
-            style="SV.Sub.TLabel"
+            text="Danh sách sinh viên đăng ký ở ký túc xá",
+            style="HUIT.Sub.TLabel"
         ).pack(
             anchor="w",
-            pady=(3, 0)
+            pady=(4, 0)
         )
 
-        ttk.Button(
+        # SEARCH
+
+        search_box = ttk.Frame(
             header,
-            text="＋  Thêm sinh viên",
-            command=self.add,
-            style="SV.Primary.TButton"
-        ).pack(
-            side="right",
-            padx=(8, 0),
+            style="HUIT.Main.TFrame"
+        )
+
+        search_box.pack(side="right")
+
+        search = ttk.Entry(
+            search_box,
+            textvariable=self.keyword,
+            width=34,
+            style="HUIT.TEntry"
+        )
+
+        search.pack(
+            side="left",
             ipady=5
         )
 
-        # Thẻ thống kê
+        search.insert(0, "")
+
+        search.bind(
+            "<Return>",
+            lambda event: self.refresh()
+        )
+
+        ttk.Button(
+            search_box,
+            text="Tìm kiếm",
+            command=self.refresh,
+            style="HUIT.Primary.TButton"
+        ).pack(
+            side="left",
+            padx=(8, 0)
+        )
+
+        # ACTION BUTTONS
+
+        action_bar = ttk.Frame(
+            container,
+            style="HUIT.Main.TFrame"
+        )
+
+        action_bar.pack(
+            fill="x",
+            pady=(20, 18)
+        )
+
+        ttk.Button(
+            action_bar,
+            text="+  Thêm",
+            command=self.add,
+            style="HUIT.Primary.TButton"
+        ).pack(side="left")
+
+        ttk.Button(
+            action_bar,
+            text="✎  Sửa",
+            command=self._edit_selected,
+            style="HUIT.TButton"
+        ).pack(
+            side="left",
+            padx=8
+        )
+
+        ttk.Button(
+            action_bar,
+            text="▤  Xóa",
+            command=self._delete_selected,
+            style="HUIT.Danger.TButton"
+        ).pack(side="left")
+
+        # STATISTICS
+
         stats = ttk.Frame(
-            wrap,
-            style="SV.TFrame"
+            container,
+            style="HUIT.Main.TFrame"
         )
 
         stats.pack(
             fill="x",
-            pady=17
+            pady=(0, 18)
         )
 
-        self.stat_total = self._stat_card(
+        self.stat_total = self._create_stat(
             stats,
             "TỔNG SINH VIÊN",
             "0"
         )
 
-        self.stat_room = self._stat_card(
+        self.stat_room = self._create_stat(
             stats,
-            "ĐANG CÓ PHÒNG",
+            "ĐANG Ở KTX",
             "0"
         )
 
-        self.stat_free = self._stat_card(
+        self.stat_free = self._create_stat(
             stats,
             "CHƯA XẾP PHÒNG",
             "0"
         )
 
-        # Khung danh sách
+        # FILTER
+
+        filter_bar = ttk.Frame(
+            container,
+            style="HUIT.Main.TFrame"
+        )
+
+        filter_bar.pack(
+            fill="x",
+            pady=(0, 14)
+        )
+
+        self.filter_buttons = {}
+
+        filters = [
+            ("all", "Tất cả"),
+            ("room", "Đang ở KTX"),
+            ("free", "Chưa xếp phòng")
+        ]
+
+        for key, label in filters:
+
+            btn = ttk.Button(
+                filter_bar,
+                text=label,
+                style="HUIT.Filter.TButton",
+                command=lambda k=key: self._change_filter(k)
+            )
+
+            btn.pack(
+                side="left",
+                padx=(0, 9)
+            )
+
+            self.filter_buttons[key] = btn
+
+        self._update_filter_style()
+
+        # TABLE CARD
+
         panel = ttk.Frame(
-            wrap,
-            style="SV.Card.TFrame",
-            padding=14
+            container,
+            style="HUIT.Card.TFrame",
+            padding=12
         )
 
         panel.pack(
@@ -234,145 +475,14 @@ class SinhVienScreen(ttk.Frame):
             expand=True
         )
 
-        # Thanh tìm kiếm
-        toolbar = ttk.Frame(
+        # TABLE
+
+        table_frame = ttk.Frame(
             panel,
-            style="SV.Card.TFrame"
+            style="HUIT.Card.TFrame"
         )
 
-        toolbar.pack(
-            fill="x",
-            pady=(0, 12)
-        )
-
-        ttk.Label(
-            toolbar,
-            text="Danh sách sinh viên",
-            background=CARD,
-            foreground=INK,
-            font=("Segoe UI", 12, "bold")
-        ).pack(side="left")
-
-        self.kw = tk.StringVar()
-
-        search = ttk.Entry(
-            toolbar,
-            textvariable=self.kw,
-            width=30,
-            style="SV.TEntry"
-        )
-
-        search.pack(
-            side="right",
-            padx=(6, 0),
-            ipady=5
-        )
-
-        search.bind(
-            "<Return>",
-            lambda _e: self.refresh()
-        )
-
-        ttk.Button(
-            toolbar,
-            text="Tìm kiếm",
-            command=self.refresh,
-            style="SV.Primary.TButton"
-        ).pack(side="right")
-
-        ttk.Button(
-            toolbar,
-            text="Làm mới",
-            command=self._clear_search,
-            style="SV.TButton"
-        ).pack(
-            side="right",
-            padx=6
-        )
-
-        # Các nút chức năng
-        actions = ttk.Frame(
-            panel,
-            style="SV.Card.TFrame"
-        )
-
-        actions.pack(
-            fill="x",
-            pady=(0, 10)
-        )
-
-        ttk.Button(
-            actions,
-            text="✎  Chỉnh sửa",
-            command=self.edit,
-            style="SV.TButton"
-        ).pack(
-            side="left",
-            padx=(0, 6)
-        )
-
-        ttk.Button(
-            actions,
-            text="⌂  Xếp / đổi phòng",
-            command=self.assign_room,
-            style="SV.TButton"
-        ).pack(
-            side="left",
-            padx=6
-        )
-
-        ttk.Button(
-            actions,
-            text="Xóa sinh viên",
-            command=self.delete,
-            style="SV.Danger.TButton"
-        ).pack(
-            side="left",
-            padx=6
-        )
-
-        # Chú thích màu giới tính
-        legend = ttk.Frame(
-            panel,
-            style="SV.Card.TFrame"
-        )
-
-        legend.pack(
-            fill="x",
-            pady=(0, 10)
-        )
-
-        tk.Label(
-            legend,
-            text="● Nam",
-            bg=CARD,
-            fg=MALE_FG,
-            font=("Segoe UI", 9, "bold")
-        ).pack(side="left", padx=(2, 12))
-
-        tk.Label(
-            legend,
-            text="● Nữ",
-            bg=CARD,
-            fg=FEMALE_FG,
-            font=("Segoe UI", 9, "bold")
-        ).pack(side="left", padx=12)
-
-        tk.Label(
-            legend,
-            text="● Khác",
-            bg=CARD,
-            fg=OTHER_FG,
-            font=("Segoe UI", 9, "bold")
-        ).pack(side="left", padx=12)
-
-        # Bảng dữ liệu
-        table_wrap = ttk.Frame(
-            panel,
-            style="SV.Card.TFrame"
-        )
-
-        table_wrap.pack(
+        table_frame.pack(
             fill="both",
             expand=True
         )
@@ -385,31 +495,18 @@ class SinhVienScreen(ttk.Frame):
             "Lop",
             "SDT",
             "QueQuan",
-            "Phong",
-            "TrangThaiPhong"
+            "Phong"
         )
 
         self.tree = ttk.Treeview(
-            table_wrap,
+            table_frame,
             columns=keys,
             show="headings",
             selectmode="browse",
-            style="SV.Treeview"
+            style="HUIT.Treeview"
         )
 
-        headings = [
-            ("MaSV", "MÃ SV", 65),
-            ("HoTen", "HỌ VÀ TÊN", 175),
-            ("NgaySinh", "NGÀY SINH", 95),
-            ("GioiTinh", "GIỚI TÍNH", 85),
-            ("Lop", "LỚP", 105),
-            ("SDT", "SỐ ĐIỆN THOẠI", 115),
-            ("QueQuan", "QUÊ QUÁN", 130),
-            ("Phong", "PHÒNG", 75),
-            ("TrangThaiPhong", "TÌNH TRẠNG", 110)
-        ]
-
-        for key, label, width in headings:
+        for key, label, width in self.columns:
 
             self.tree.heading(
                 key,
@@ -419,36 +516,30 @@ class SinhVienScreen(ttk.Frame):
             self.tree.column(
                 key,
                 width=width,
-                minwidth=55,
-                anchor=(
-                    "center"
-                    if key in (
-                        "MaSV",
-                        "NgaySinh",
-                        "GioiTinh",
-                        "Phong",
-                        "TrangThaiPhong"
-                    )
-                    else "w"
-                )
+                minwidth=65,
+                anchor="center" if key in (
+                    "MaSV",
+                    "NgaySinh",
+                    "GioiTinh",
+                    "Phong"
+                ) else "w"
             )
 
-        # Thanh cuộn
-        sy = ttk.Scrollbar(
-            table_wrap,
+        scroll_y = ttk.Scrollbar(
+            table_frame,
             orient="vertical",
             command=self.tree.yview
         )
 
-        sx = ttk.Scrollbar(
-            table_wrap,
+        scroll_x = ttk.Scrollbar(
+            table_frame,
             orient="horizontal",
             command=self.tree.xview
         )
 
         self.tree.configure(
-            yscrollcommand=sy.set,
-            xscrollcommand=sx.set
+            yscrollcommand=scroll_y.set,
+            xscrollcommand=scroll_x.set
         )
 
         self.tree.grid(
@@ -457,196 +548,263 @@ class SinhVienScreen(ttk.Frame):
             sticky="nsew"
         )
 
-        sy.grid(
+        scroll_y.grid(
             row=0,
             column=1,
             sticky="ns"
         )
 
-        sx.grid(
+        scroll_x.grid(
             row=1,
             column=0,
             sticky="ew"
         )
 
-        table_wrap.rowconfigure(
+        table_frame.rowconfigure(
             0,
             weight=1
         )
 
-        table_wrap.columnconfigure(
+        table_frame.columnconfigure(
             0,
             weight=1
+        )
+
+        self.tree.tag_configure(
+            "even",
+            background=WHITE,
+            foreground=TEXT
+        )
+
+        self.tree.tag_configure(
+            "odd",
+            background="#F8FAFE",
+            foreground=TEXT
+        )
+
+        self.tree.tag_configure(
+            "room",
+            foreground=GREEN
         )
 
         self.tree.bind(
             "<Double-1>",
-            lambda _e: self.edit()
+            lambda event: self._edit_selected()
         )
 
-        # Màu từng dòng theo giới tính
-        self.tree.tag_configure(
-            "nam",
-            background=MALE_BG,
-            foreground=MALE_FG
+        # FOOTER
+
+        footer = ttk.Frame(
+            panel,
+            style="HUIT.Card.TFrame"
         )
 
-        self.tree.tag_configure(
-            "nu",
-            background=FEMALE_BG,
-            foreground=FEMALE_FG
+        footer.pack(
+            fill="x",
+            pady=(10, 0)
         )
 
-        self.tree.tag_configure(
-            "khac",
-            background=OTHER_BG,
-            foreground=OTHER_FG
+        self.lbl_count = tk.Label(
+            footer,
+            text="Hiển thị 0 sinh viên",
+            bg=WHITE,
+            fg=MUTED,
+            font=("Segoe UI", 9)
         )
 
-    # ==================== THẺ THỐNG KÊ ====================
+        self.lbl_count.pack(side="left")
 
-    def _stat_card(self, parent, label, value):
+        tk.Label(
+            footer,
+            text="Chọn một sinh viên để thực hiện thao tác",
+            bg=WHITE,
+            fg=MUTED,
+            font=("Segoe UI", 9)
+        ).pack(side="right")
+
+    # =====================================================
+    # STATISTIC CARDS
+    # =====================================================
+
+    def _create_stat(self, parent, label, value):
 
         card = ttk.Frame(
             parent,
-            style="SV.Card.TFrame",
-            padding=(15, 12)
+            style="HUIT.Card.TFrame",
+            padding=(17, 13)
         )
 
         card.pack(
             side="left",
             fill="x",
             expand=True,
-            padx=(0, 10)
+            padx=(0, 12)
         )
 
         ttk.Label(
             card,
             text=label,
-            style="SV.CardTitle.TLabel"
+            style="HUIT.CardTitle.TLabel"
         ).pack(anchor="w")
 
-        val = ttk.Label(
+        result = ttk.Label(
             card,
             text=value,
-            style="SV.CardValue.TLabel"
+            style="HUIT.CardValue.TLabel"
         )
 
-        val.pack(
+        result.pack(
             anchor="w",
             pady=(5, 0)
         )
 
-        return val
+        return result
 
-    # ==================== LÀM MỚI VÀ TÌM KIẾM ====================
+    # =====================================================
+    # FILTER
+    # =====================================================
 
-    def _clear_search(self):
-        self.kw.set("")
+    def _change_filter(self, key):
+
+        self.filter_type.set(key)
+
+        self._update_filter_style()
+
         self.refresh()
 
-    def refresh(self):
+    def _update_filter_style(self):
 
-        kw = self.kw.get().strip()
+        for key, btn in self.filter_buttons.items():
+
+            if key == self.filter_type.get():
+
+                btn.configure(
+                    style="HUIT.ActiveFilter.TButton"
+                )
+
+            else:
+
+                btn.configure(
+                    style="HUIT.Filter.TButton"
+                )
+
+    # =====================================================
+    # GET DATA
+    # =====================================================
+
+    def rows(self, kw):
+
         like = f"%{kw}%"
 
-        rows = db.query("""
+        return db.query("""
             SELECT s.*,
-                   h.MaHD,
-                   h.MaPhong,
-                   COALESCE(p.TenPhong, '') AS Phong,
-
-                   CASE
-                       WHEN h.MaHD IS NULL
-                       THEN 'Chưa xếp phòng'
-                       ELSE h.TrangThai
-                   END AS TrangThaiPhong,
-
-                   COALESCE(h.NgayBatDau, '') AS NgayBatDau,
-                   COALESCE(h.NgayKetThuc, '') AS NgayKetThuc
+                COALESCE(
+                    (
+                        SELECT p.TenPhong
+                        FROM HopDong h
+                        JOIN Phong p ON p.MaPhong = h.MaPhong
+                        WHERE h.MaSV = s.MaSV
+                        AND h.TrangThai = 'Đang thuê'
+                        LIMIT 1
+                    ),
+                    ''
+                ) AS Phong
 
             FROM SinhVien s
-
-            LEFT JOIN HopDong h
-                ON h.MaSV = s.MaSV
-                AND h.TrangThai = 'Đang thuê'
-
-            LEFT JOIN Phong p
-                ON p.MaPhong = h.MaPhong
 
             WHERE CAST(s.MaSV AS TEXT) LIKE ?
                 OR s.HoTen LIKE ?
                 OR s.Lop LIKE ?
                 OR s.SDT LIKE ?
-                OR p.TenPhong LIKE ?
 
             ORDER BY s.MaSV
-        """, (like,) * 5)
+        """, (like,) * 4)
 
-        self.tree.delete(
-            *self.tree.get_children()
-        )
+    # =====================================================
+    # REFRESH TABLE
+    # =====================================================
 
-        for r in rows:
+    def refresh(self):
 
-            gender = (
-                (r["GioiTinh"] or "")
-                .strip()
-                .lower()
+        try:
+
+            kw = self.keyword.get().strip()
+
+            data = self.rows(kw)
+
+            total = len(data)
+
+            room_count = sum(
+                1 for item in data if item["Phong"]
             )
 
-            if gender == "nam":
-                tag = "nam"
+            free_count = total - room_count
 
-            elif gender in ("nữ", "nu"):
-                tag = "nu"
+            self.stat_total.configure(
+                text=str(total)
+            )
 
-            else:
-                tag = "khac"
+            self.stat_room.configure(
+                text=str(room_count)
+            )
 
-            self.tree.insert(
-                "",
-                "end",
-                iid=str(r["MaSV"]),
-                tags=(tag,),
-                values=(
-                    r["MaSV"],
-                    r["HoTen"],
-                    r["NgaySinh"] or "",
-                    r["GioiTinh"] or "",
-                    r["Lop"] or "",
-                    r["SDT"] or "",
-                    r["QueQuan"] or "",
-                    r["Phong"] or "—",
-                    r["TrangThaiPhong"]
+            self.stat_free.configure(
+                text=str(free_count)
+            )
+
+            for item in self.tree.get_children():
+
+                self.tree.delete(item)
+
+            displayed = 0
+
+            for index, item in enumerate(data):
+
+                room = item["Phong"]
+
+                if self.filter_type.get() == "room" and not room:
+                    continue
+
+                if self.filter_type.get() == "free" and room:
+                    continue
+
+                values = (
+                    item["MaSV"],
+                    item["HoTen"],
+                    item["NgaySinh"],
+                    item["GioiTinh"],
+                    item["Lop"],
+                    item["SDT"],
+                    item["QueQuan"],
+                    room if room else "Chưa xếp"
                 )
+
+                tag = "even" if displayed % 2 == 0 else "odd"
+
+                if room:
+                    tag = "room"
+
+                self.tree.insert(
+                    "",
+                    "end",
+                    iid=str(item["MaSV"]),
+                    values=values,
+                    tags=(tag,)
+                )
+
+                displayed += 1
+
+            self.lbl_count.configure(
+                text=f"Hiển thị {displayed} / {total} sinh viên"
             )
 
-        # Cập nhật số liệu thống kê
-        total = db.query(
-            "SELECT COUNT(*) FROM SinhVien",
-            one=True
-        )[0]
+        except Exception as e:
 
-        housed = db.query("""
-            SELECT COUNT(DISTINCT MaSV)
-            FROM HopDong
-            WHERE TrangThai = 'Đang thuê'
-        """, one=True)[0]
+            error(f"Không thể tải danh sách sinh viên: {e}")
 
-        self.stat_total.config(
-            text=str(total)
-        )
-
-        self.stat_room.config(
-            text=str(housed)
-        )
-
-        self.stat_free.config(
-            text=str(total - housed)
-        )
-
-    # ==================== LẤY SINH VIÊN ĐƯỢC CHỌN ====================
+    # =====================================================
+    # SELECTED STUDENT
+    # =====================================================
 
     def _selected_id(self):
 
@@ -655,582 +813,161 @@ class SinhVienScreen(ttk.Frame):
         if not selected:
 
             messagebox.showwarning(
-                "Chưa chọn sinh viên",
-                "Vui lòng chọn một sinh viên trong danh sách."
+                "Thông báo",
+                "Vui lòng chọn sinh viên cần thao tác.",
+                parent=self
             )
 
             return None
 
-        return int(selected[0])
-
-    # ==================== DANH SÁCH PHÒNG ====================
-
-    def _room_options(self, current_room_id=None):
-
-        options = [
-            "0 - Chưa xếp phòng"
-        ]
-
-        for p in db.danh_sach_phong():
-
-            available = (
-                p["SoGiuong"] - p["DangO"]
-            )
-
-            is_current = (
-                p["MaPhong"] == current_room_id
-            )
-
-            if (
-                p["TinhTrang"] in ("Trống", "Còn chỗ")
-                or is_current
-            ):
-
-                note = (
-                    "phòng hiện tại"
-                    if is_current
-                    else f"còn {available} chỗ"
-                )
-
-                options.append(
-                    f"{p['MaPhong']} - {p['TenPhong']} ({note})"
-                )
-
-        return options
-
-    # ==================== FORM THÊM / SỬA ====================
-
-    def _dialog(
-        self,
-        title,
-        current=None,
-        current_contract=None
-    ):
-
-        current = current or {}
-        current_contract = current_contract or {}
-
-        room_id = current_contract.get("MaPhong")
-
-        rooms = self._room_options(room_id)
-
-        win = tk.Toplevel(self)
-
-        win.title(title)
-        win.configure(bg=CARD)
-        win.transient(self.winfo_toplevel())
-        win.resizable(False, False)
-        win.grab_set()
-
-        outer = tk.Frame(
-            win,
-            bg=CARD,
-            padx=24,
-            pady=20
-        )
-
-        outer.pack(
-            fill="both",
-            expand=True
-        )
-
-        tk.Label(
-            outer,
-            text=title,
-            bg=CARD,
-            fg=INK,
-            font=("Segoe UI", 16, "bold")
-        ).grid(
-            row=0,
-            column=0,
-            columnspan=2,
-            sticky="w",
-            pady=(0, 14)
-        )
-
-        fields = [
-            ("HoTen", "Họ và tên", "entry"),
-            ("NgaySinh", "Ngày sinh (dd/mm/yyyy)", "entry"),
-            ("GioiTinh", "Giới tính", "combo"),
-            ("Lop", "Lớp", "entry"),
-            ("SDT", "Số điện thoại", "entry"),
-            ("QueQuan", "Quê quán", "entry"),
-            ("Phong", "Phòng ở", "room"),
-            ("NgayBatDau", "Ngày bắt đầu ở", "entry"),
-            ("NgayKetThuc", "Ngày kết thúc dự kiến", "entry")
-        ]
-
-        widgets = {}
-
-        defaults = dict(current)
-
-        defaults["Phong"] = next(
-            (
-                x for x in rooms
-                if room_id and pick_id(x) == room_id
-            ),
-            rooms[0]
-        )
-
-        defaults["NgayBatDau"] = (
-            current_contract.get("NgayBatDau")
-            or date.today().strftime("%d/%m/%Y")
-        )
-
-        defaults["NgayKetThuc"] = (
-            current_contract.get("NgayKetThuc")
-            or ""
-        )
-
-        for i, (key, label, kind) in enumerate(
-            fields,
-            start=1
-        ):
-
-            tk.Label(
-                outer,
-                text=label,
-                bg=CARD,
-                fg=HUIT_NAVY,
-                font=("Segoe UI", 9, "bold")
-            ).grid(
-                row=i,
-                column=0,
-                sticky="w",
-                pady=6,
-                padx=(0, 18)
-            )
-
-            if kind == "combo":
-
-                w = ttk.Combobox(
-                    outer,
-                    values=["Nam", "Nữ", "Khác"],
-                    state="readonly",
-                    width=34,
-                    style="SV.TCombobox"
-                )
-
-                w.set(
-                    defaults.get(key) or "Nam"
-                )
-
-            elif kind == "room":
-
-                w = ttk.Combobox(
-                    outer,
-                    values=rooms,
-                    state="readonly",
-                    width=34,
-                    style="SV.TCombobox"
-                )
-
-                w.set(
-                    defaults["Phong"]
-                )
-
-            else:
-
-                w = ttk.Entry(
-                    outer,
-                    width=37,
-                    style="SV.TEntry"
-                )
-
-                value = defaults.get(key)
-
-                if value is not None:
-                    w.insert(0, str(value))
-
-            w.grid(
-                row=i,
-                column=1,
-                sticky="ew",
-                pady=6,
-                ipady=4
-            )
-
-            widgets[key] = w
-
-        tk.Label(
-            outer,
-            text="Chọn “Chưa xếp phòng” nếu sinh viên chưa đăng ký lưu trú.",
-            bg=CARD,
-            fg=MUTED,
-            font=("Segoe UI", 8)
-        ).grid(
-            row=10,
-            column=0,
-            columnspan=2,
-            sticky="w",
-            pady=(4, 10)
-        )
-
-        result = {}
-
-        def submit():
-
-            result.update({
-                k: w.get().strip()
-                for k, w in widgets.items()
-            })
-
-            win.destroy()
-
-        buttons = tk.Frame(
-            outer,
-            bg=CARD
-        )
-
-        buttons.grid(
-            row=11,
-            column=0,
-            columnspan=2,
-            sticky="e",
-            pady=(8, 0)
-        )
-
-        ttk.Button(
-            buttons,
-            text="Hủy",
-            command=win.destroy,
-            style="SV.TButton"
-        ).pack(
-            side="right",
-            padx=(8, 0)
-        )
-
-        ttk.Button(
-            buttons,
-            text="Lưu thông tin",
-            command=submit,
-            style="SV.Primary.TButton"
-        ).pack(side="right")
-
-        win.bind(
-            "<Return>",
-            lambda _e: submit()
-        )
-
-        win.bind(
-            "<Escape>",
-            lambda _e: win.destroy()
-        )
-
-        win.wait_window()
-
-        return result or None
-
-    # ==================== KIỂM TRA DỮ LIỆU ====================
-
-    def _validate(self, d):
-
-        if not d["HoTen"]:
-            return "Họ tên không được để trống."
-
-        if (
-            d["NgaySinh"]
-            and not valid_date(d["NgaySinh"])
-        ):
-            return "Ngày sinh phải có dạng dd/mm/yyyy."
-
-        if d["SDT"] and not (
-            d["SDT"].isdigit()
-            and 9 <= len(d["SDT"]) <= 11
-        ):
-            return "Số điện thoại phải gồm 9–11 chữ số."
-
-        room_id = pick_id(d["Phong"])
-
-        if room_id:
-
-            if (
-                not valid_date(d["NgayBatDau"])
-                or not valid_date(d["NgayKetThuc"])
-            ):
-                return (
-                    "Vui lòng nhập ngày bắt đầu và ngày kết thúc "
-                    "theo dạng dd/mm/yyyy."
-                )
-
-            if (
-                parse_date(d["NgayKetThuc"])
-                <= parse_date(d["NgayBatDau"])
-            ):
-                return "Ngày kết thúc phải sau ngày bắt đầu."
-
-            room = next(
-                (
-                    p for p in db.danh_sach_phong()
-                    if p["MaPhong"] == room_id
-                ),
-                None
-            )
-
-            if not room:
-                return "Phòng được chọn không còn tồn tại."
-
-            if room["TinhTrang"] == "Bảo trì":
-                return "Phòng đang bảo trì, vui lòng chọn phòng khác."
-
-            if (
-                room["DangO"] >= room["SoGiuong"]
-                and room_id != getattr(
-                    self,
-                    "_editing_room_id",
-                    None
-                )
-            ):
-                return "Phòng đã đủ số lượng sinh viên."
-
-        return None
-
-    # ==================== THÊM SINH VIÊN ====================
+        return selected[0]
+
+    # =====================================================
+    # ADD
+    # =====================================================
 
     def add(self):
 
-        self._editing_room_id = None
-
-        d = self._dialog(
-            "Thêm sinh viên"
+        d = form_dialog(
+            self,
+            "Thêm sinh viên",
+            FIELDS
         )
 
         if not d:
             return
 
-        err = self._validate(d)
+        err = validate(d)
 
         if err:
             return error(err)
 
-        sv_id = db.execute("""
-            INSERT INTO SinhVien(
-                HoTen,
-                NgaySinh,
-                GioiTinh,
-                Lop,
-                SDT,
-                QueQuan
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, tuple(
-            d[k]
-            for k in (
-                "HoTen",
-                "NgaySinh",
-                "GioiTinh",
-                "Lop",
-                "SDT",
-                "QueQuan"
-            )
-        ))
-
-        room_id = pick_id(d["Phong"])
-
-        if room_id:
+        try:
 
             db.execute("""
-                INSERT INTO HopDong(
-                    MaSV,
-                    MaPhong,
-                    NgayBatDau,
-                    NgayKetThuc
+                INSERT INTO SinhVien(
+                    HoTen,
+                    NgaySinh,
+                    GioiTinh,
+                    Lop,
+                    SDT,
+                    QueQuan
                 )
-                VALUES (?, ?, ?, ?)
-            """, (
-                sv_id,
-                room_id,
-                d["NgayBatDau"],
-                d["NgayKetThuc"]
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, tuple(
+                d[k] for k in (
+                    "HoTen",
+                    "NgaySinh",
+                    "GioiTinh",
+                    "Lop",
+                    "SDT",
+                    "QueQuan"
+                )
             ))
 
-        self.refresh()
-
-    # ==================== CHỈNH SỬA SINH VIÊN ====================
-
-    def edit(self):
-
-        sv_id = self._selected_id()
-
-        if sv_id is None:
-            return
-
-        current = db.query(
-            "SELECT * FROM SinhVien WHERE MaSV=?",
-            (sv_id,),
-            one=True
-        )
-
-        contract = db.query("""
-            SELECT *
-            FROM HopDong
-            WHERE MaSV=?
-                AND TrangThai='Đang thuê'
-            LIMIT 1
-        """, (sv_id,), one=True)
-
-        self._editing_room_id = (
-            contract["MaPhong"]
-            if contract
-            else None
-        )
-
-        d = self._dialog(
-            "Cập nhật sinh viên",
-            dict(current),
-            dict(contract) if contract else None
-        )
-
-        if not d:
-            return
-
-        err = self._validate(d)
-
-        if err:
-            return error(err)
-
-        db.execute("""
-            UPDATE SinhVien
-            SET HoTen=?,
-                NgaySinh=?,
-                GioiTinh=?,
-                Lop=?,
-                SDT=?,
-                QueQuan=?
-            WHERE MaSV=?
-        """, tuple(
-            d[k]
-            for k in (
-                "HoTen",
-                "NgaySinh",
-                "GioiTinh",
-                "Lop",
-                "SDT",
-                "QueQuan"
+            messagebox.showinfo(
+                "Thành công",
+                "Thêm sinh viên thành công!",
+                parent=self
             )
-        ) + (sv_id,))
 
-        self._save_room(
-            sv_id,
-            d,
-            contract
-        )
+            self.refresh()
 
-        self.refresh()
+        except Exception as e:
 
-    # ==================== XẾP / ĐỔI PHÒNG ====================
+            error(f"Không thể thêm sinh viên: {e}")
 
-    def assign_room(self):
+    # =====================================================
+    # EDIT
+    # =====================================================
 
-        sv_id = self._selected_id()
+    def _edit_selected(self):
 
-        if sv_id is None:
-            return
+        id_ = self._selected_id()
 
-        current = db.query(
-            "SELECT * FROM SinhVien WHERE MaSV=?",
-            (sv_id,),
-            one=True
-        )
+        if id_ is not None:
+            self.edit(id_)
 
-        contract = db.query("""
-            SELECT *
-            FROM HopDong
-            WHERE MaSV=?
-                AND TrangThai='Đang thuê'
-            LIMIT 1
-        """, (sv_id,), one=True)
+    def edit(self, id_):
 
-        self._editing_room_id = (
-            contract["MaPhong"]
-            if contract
-            else None
-        )
+        try:
 
-        d = self._dialog(
-            "Xếp / đổi phòng cho sinh viên",
-            dict(current),
-            dict(contract) if contract else None
-        )
+            result = db.query(
+                "SELECT * FROM SinhVien WHERE MaSV=?",
+                (id_,),
+                one=True
+            )
 
-        if not d:
-            return
+            if not result:
+                return error("Không tìm thấy sinh viên.")
 
-        err = self._validate(d)
+            cur = dict(result)
 
-        if err:
-            return error(err)
+            d = form_dialog(
+                self,
+                "Sửa thông tin sinh viên",
+                FIELDS,
+                cur
+            )
 
-        self._save_room(
-            sv_id,
-            d,
-            contract
-        )
+            if not d:
+                return
 
-        self.refresh()
+            err = validate(d)
 
-    def _save_room(self, sv_id, d, contract):
-
-        room_id = pick_id(d["Phong"])
-
-        if contract:
-
-            if room_id:
-
-                db.execute("""
-                    UPDATE HopDong
-                    SET MaPhong=?,
-                        NgayBatDau=?,
-                        NgayKetThuc=?
-                    WHERE MaHD=?
-                """, (
-                    room_id,
-                    d["NgayBatDau"],
-                    d["NgayKetThuc"],
-                    contract["MaHD"]
-                ))
-
-            else:
-
-                db.execute("""
-                    UPDATE HopDong
-                    SET TrangThai='Đã kết thúc',
-                        NgayKetThuc=?
-                    WHERE MaHD=?
-                """, (
-                    date.today().strftime("%d/%m/%Y"),
-                    contract["MaHD"]
-                ))
-
-        elif room_id:
+            if err:
+                return error(err)
 
             db.execute("""
-                INSERT INTO HopDong(
-                    MaSV,
-                    MaPhong,
-                    NgayBatDau,
-                    NgayKetThuc
+                UPDATE SinhVien
+                SET
+                    HoTen=?,
+                    NgaySinh=?,
+                    GioiTinh=?,
+                    Lop=?,
+                    SDT=?,
+                    QueQuan=?
+                WHERE MaSV=?
+            """, tuple(
+                d[k] for k in (
+                    "HoTen",
+                    "NgaySinh",
+                    "GioiTinh",
+                    "Lop",
+                    "SDT",
+                    "QueQuan"
                 )
-                VALUES (?, ?, ?, ?)
-            """, (
-                sv_id,
-                room_id,
-                d["NgayBatDau"],
-                d["NgayKetThuc"]
-            ))
+            ) + (id_,))
 
-    # ==================== XÓA SINH VIÊN ====================
+            messagebox.showinfo(
+                "Thành công",
+                "Cập nhật thông tin thành công!",
+                parent=self
+            )
 
-    def delete(self):
+            self.refresh()
 
-        sv_id = self._selected_id()
+        except Exception as e:
 
-        if sv_id is None:
-            return
+            error(f"Không thể cập nhật sinh viên: {e}")
+
+    # =====================================================
+    # DELETE
+    # =====================================================
+
+    def _delete_selected(self):
+
+        id_ = self._selected_id()
+
+        if id_ is not None:
+            self.delete(id_)
+
+    def delete(self, id_):
 
         confirm = messagebox.askyesno(
             "Xác nhận xóa",
-            "Bạn có chắc muốn xóa sinh viên này?"
+            "Bạn có chắc chắn muốn xóa sinh viên này không?",
+            parent=self
         )
 
         if not confirm:
@@ -1240,21 +977,17 @@ class SinhVienScreen(ttk.Frame):
 
             db.execute(
                 "DELETE FROM SinhVien WHERE MaSV=?",
-                (sv_id,)
+                (id_,)
             )
 
-        except Exception as exc:
-
-            messagebox.showerror(
-                "Không thể xóa",
-                "Sinh viên đang có dữ liệu hợp đồng hoặc hóa đơn liên quan.\n"
-                "Hãy kết thúc/xử lý dữ liệu liên quan trước.\n\n"
-                + str(exc)
+            messagebox.showinfo(
+                "Thành công",
+                "Đã xóa sinh viên!",
+                parent=self
             )
 
-            return
+            self.refresh()
 
-        self.refresh()
-        # lý đẹp trai nhất BD
+        except Exception as e:
 
-
+            error(f"Không thể xóa sinh viên: {e}")
