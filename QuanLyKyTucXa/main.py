@@ -7,11 +7,11 @@ from screens.dashboard import DashboardScreen
 from screens.dichvu import DichVuScreen
 from screens.hoadon import HoaDonScreen
 from screens.hopdong import HopDongScreen
-from screens.login import PRIMARY, LoginScreen
+from screens.login import LoginScreen
 from screens.nhanvien import NhanVienScreen
 from screens.phong import PhongScreen
 from screens.sinhvien import SinhVienScreen
-from screens.student_home import StudentHomeScreen
+from screens.student_home import StudentShell
 from screens.thongke import ThongKeScreen
 
 MENU = [("🏠 Trang chủ", DashboardScreen, False), ("🎓 Sinh viên", SinhVienScreen, False),
@@ -53,15 +53,8 @@ class App(tk.Tk):
     # ------------------------------------------------------------------ giao diện sinh viên
     def show_student(self):
         self._clear()
-        self.minsize(900, 560)
-        bar = tk.Frame(self, bg=PRIMARY)
-        bar.pack(fill="x")
-        tk.Label(bar, text="KÝ TÚC XÁ SINH VIÊN", bg=PRIMARY, fg="white",
-                 font=("Segoe UI", 13, "bold")).pack(side="left", padx=16, pady=12)
-        tk.Button(bar, text="⏻ Đăng xuất", bg=PRIMARY, fg="white", relief="flat", cursor="hand2",
-                  activebackground="#0B3C8C", activeforeground="white", font=("Segoe UI", 10, "bold"),
-                  command=self.show_login).pack(side="right", padx=12)
-        StudentHomeScreen(self, self.user).pack(fill="both", expand=True)
+        self.minsize(1100, 680)
+        StudentShell(self, self.user, self.show_login).pack(fill="both", expand=True)
 
     # ------------------------------------------------------------------ giao diện quản trị
     def show_main(self):
