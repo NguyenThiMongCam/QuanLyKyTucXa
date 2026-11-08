@@ -1,1 +1,1 @@
-{"role": "admin", "users": {"admin": "admin"}}
+{"role": "student", "users": {"admin": "admin", "student": "1"}}
