@@ -1,282 +1,84 @@
+"""Trang Phòng (quản trị) - giao diện xanh trắng theo mẫu thiết kế.
+
+- 4 thẻ thống kê: tổng số phòng, giường còn trống, tỷ lệ lấp đầy (có thanh tiến độ), phòng đang bảo trì
+- Lọc nhanh theo tình trạng (Còn chỗ / Trống / Đầy / Bảo trì) + lọc theo tầng + tìm kiếm tức thì
+- Hai kiểu xem: "Danh sách" (bảng) và "Sơ đồ giường" (từng phòng với từng giường, tên sinh viên đang ở)
+- Thêm / Sửa / Xóa phòng, nút "Loại phòng" mở bảng quản lý loại phòng
+"""
+import sqlite3
 import tkinter as tk
-from tkinter import ttk
+from math import ceil
+from tkinter import messagebox, ttk
+from tkinter import font as tkfont
 
 import database as db
-from screens.base import CrudScreen, error, money, pick_id
+from screens.base import CrudScreen, error, form_dialog, money, pick_id
+from screens.login import BORDER, FONT, MUTED, NAVY, PAGE_BG, PRIMARY, SEL_BG, TEXT, rounded_rect
+from screens.sinhvien import (GREEN_FG, LINE, Card, Chip, DataTable, IconButton, SearchBox, fold)
+
+STATUS_STYLE = {"Còn chỗ": ("#0E7A3B", "#E4F6EA"), "Trống": ("#1D4F9F", "#DCE9FB"),
+                "Đầy": ("#B42318", "#FDE8E8"), "Bảo trì": ("#8A5A00", "#FFF0D0")}
+FILTERS = ["Tất cả", "Còn chỗ", "Trống", "Đầy", "Bảo trì"]
+ALL_FLOORS = "Tất cả các tầng"
+TRACK, BAR_OK, BAR_FULL = "#D9E1F0", "#1E9E4A", "#C0392B"
+MAINT_FG = STATUS_STYLE["Bảo trì"][0]
+
+# cột bảng: (khóa, tiêu đề, rộng tối thiểu, tỉ lệ giãn)
+ROOM_COLS = [("MaPhong", "Mã", 50, 0.4), ("TenPhong", "Tên phòng", 90, 0.9), ("TenLoai", "Loại phòng", 120, 1.3),
+             ("Tang", "Tầng", 56, 0.4), ("SoGiuong", "Số giường", 76, 0.6), ("DangO", "Đang ở", 150, 1.3),
+             ("Gia", "Giá/người/tháng", 120, 1.1), ("TinhTrang", "Trạng thái", 100, 0.9)]
 
 
-# ==============================
-# MÀU SẮC
-# ==============================
-HUIT_BLUE = "#034EA2"
-HUIT_BLUE_DARK = "#023B7A"
-HUIT_BLUE_LIGHT = "#EAF2FB"
-HUIT_RED = "#ED1C24"
-
-NAVY = "#142B4A"
-BG = "#F4F7FB"
-TEXT = "#263445"
-MUTED = "#64748B"
-WHITE = "#FFFFFF"
-BORDER = "#DCE5F0"
-GREEN = "#16834A"
-ORANGE = "#C47A12"
-
-
-# ==============================
-# FORM DIALOG HIỆN ĐẠI
-# ==============================
-def modern_form_dialog(parent, title, fields, initial=None):
-    result = {}
-    win = tk.Toplevel(parent)
-    win.title(title)
-    win.configure(bg=WHITE)
-    win.resizable(False, False)
-    win.transient(parent.winfo_toplevel())
-    win.grab_set()
-
-    w, h = 420, 400
-    x = parent.winfo_rootx() + (parent.winfo_width() - w) // 2
-    y = parent.winfo_rooty() + (parent.winfo_height() - h) // 2
-    win.geometry(f"{w}x{h}+{x}+{y}")
-
-    container = tk.Frame(win, bg=WHITE, padx=28, pady=24)
-    container.pack(fill="both", expand=True)
-
-    tk.Label(
-        container, text=title,
-        font=("Segoe UI", 16, "bold"),
-        fg=HUIT_BLUE_DARK, bg=WHITE
-    ).pack(anchor="w", pady=(0, 18))
-
-    entries = {}
-
-    for key, label, kind, options in fields:
-        tk.Label(
-            container,
-            text=label + (" *" if key in ("TenPhong", "Tang") else ""),
-            font=("Segoe UI", 9), fg=TEXT, bg=WHITE
-        ).pack(anchor="w", pady=(8, 3))
-
-        if kind == "entry":
-            ent = ttk.Entry(container, font=("Segoe UI", 10))
-            ent.pack(fill="x", ipady=6)
-
-            if key == "TenPhong":
-                ph = "Ví dụ: A301"
-                ent.insert(0, ph)
-                ent.config(foreground=MUTED)
-
-                def on_in(e, entry=ent, p=ph):
-                    if entry.get() == p:
-                        entry.delete(0, "end")
-                        entry.config(foreground=TEXT)
-
-                def on_out(e, entry=ent, p=ph):
-                    if not entry.get().strip():
-                        entry.insert(0, p)
-                        entry.config(foreground=MUTED)
-
-                ent.bind("<FocusIn>", on_in)
-                ent.bind("<FocusOut>", on_out)
-
-            if initial and key in initial:
-                val = str(initial.get(key, ""))
-                if key == "TenPhong" and val:
-                    ent.delete(0, "end")
-                    ent.insert(0, val)
-                    ent.config(foreground=TEXT)
-                elif key != "TenPhong":
-                    ent.insert(0, val)
-
-            entries[key] = ent
-
-        elif kind == "combo":
-            cb = ttk.Combobox(
-                container, values=options or [],
-                state="readonly", font=("Segoe UI", 10)
-            )
-            cb.pack(fill="x", ipady=5)
-            if initial and key in initial:
-                cb.set(initial[key])
-            elif options:
-                cb.current(0)
-            entries[key] = cb
-
-    tk.Frame(container, bg=WHITE, height=18).pack()
-
-    btn_frame = tk.Frame(container, bg=WHITE)
-    btn_frame.pack(fill="x")
-
-    def on_cancel():
-        win.destroy()
-
-    def on_save():
-        data = {}
-        for k, widget in entries.items():
-            val = widget.get().strip()
-            if k == "TenPhong" and val == "Ví dụ: A301":
-                val = ""
-            data[k] = val
-        result.update(data)
-        win.destroy()
-
-    tk.Button(
-        btn_frame, text="Hủy",
-        font=("Segoe UI", 10), fg=TEXT, bg=WHITE,
-        activebackground="#F1F5F9",
-        relief="solid", borderwidth=1,
-        highlightthickness=1, highlightbackground=BORDER,
-        padx=18, pady=7, cursor="hand2",
-        command=on_cancel
-    ).pack(side="right", padx=(8, 0))
-
-    tk.Button(
-        btn_frame, text="Lưu",
-        font=("Segoe UI", 10, "bold"),
-        fg=WHITE, bg=HUIT_BLUE,
-        activebackground=HUIT_BLUE_DARK, activeforeground=WHITE,
-        relief="flat", padx=22, pady=7, cursor="hand2",
-        command=on_save
-    ).pack(side="right")
-
-    win.wait_window()
-    return result if result else None
+# ---------------------------------------------------------------------- dữ liệu
+def load_rooms():
+    """Danh sách phòng + tên các sinh viên đang ở (Nguoi) + giá đã định dạng (Gia)."""
+    people = {}
+    for r in db.query("SELECT h.MaPhong, s.HoTen FROM HopDong h JOIN SinhVien s ON s.MaSV=h.MaSV "
+                      "WHERE h.TrangThai='Đang thuê' ORDER BY h.MaHD"):
+        people.setdefault(r["MaPhong"], []).append(r["HoTen"])
+    out = []
+    for p in db.danh_sach_phong():
+        d = dict(p)
+        d["Gia"] = money(d["GiaThue"])
+        d["Nguoi"] = people.get(d["MaPhong"], [])
+        d["_hay"] = fold(f"{d['TenPhong']} {d['TenLoai']}")
+        out.append(d)
+    return out
 
 
-# ==============================
-# STYLE
-# ==============================
-class _PhongStyle:
-    def __init__(self, master, *args, **kwargs):
-        super().__init__(master, *args, **kwargs)
-        self._setup_phong_style()
-
-    def _setup_phong_style(self):
-        style = ttk.Style(self)
-        style.configure("Phong.TFrame", background=BG)
-        style.configure("Phong.TLabel", background=BG, foreground=TEXT, font=("Segoe UI", 10))
-        style.configure("PhongTitle.TLabel", background=BG, foreground=HUIT_BLUE_DARK, font=("Segoe UI", 18, "bold"))
-        style.configure("PhongSub.TLabel", background=BG, foreground=MUTED, font=("Segoe UI", 9))
-
-        style.configure(
-            "Phong.TButton",
-            font=("Segoe UI", 9, "bold"),
-            padding=(12, 8),
-            background=HUIT_BLUE_LIGHT,
-            foreground=HUIT_BLUE_DARK,
-            borderwidth=0
-        )
-        style.map("Phong.TButton",
-                  background=[("pressed", "#D4E4F7"), ("active", "#DCEAF9")],
-                  foreground=[("disabled", "#9AA8B8")])
-
-        style.configure("Phong.TEntry", padding=(8, 7), fieldbackground=WHITE)
-        style.configure("Phong.TCombobox", padding=(7, 6), fieldbackground=WHITE)
-
-        style.configure(
-            "Phong.Treeview",
-            background=WHITE, foreground=TEXT,
-            fieldbackground=WHITE, rowheight=38,
-            font=("Segoe UI", 9), borderwidth=0
-        )
-        style.configure(
-            "Phong.Treeview.Heading",
-            background="#E2EEFC", foreground=HUIT_BLUE_DARK,
-            font=("Segoe UI", 9, "bold"),
-            padding=(8, 10), relief="flat"
-        )
-        style.map("Phong.Treeview",
-                  background=[("selected", "#C9DDF5")],
-                  foreground=[("selected", NAVY)])
-        style.map("Phong.Treeview.Heading",
-                  background=[("active", "#D4E4F7")],
-                  foreground=[("active", HUIT_BLUE_DARK)])
-
-        self.configure(style="Phong.TFrame")
-
-        for child in self.winfo_children():
-            self._style_children(child)
-
-        if hasattr(self, "table") and hasattr(self.table, "tree"):
-            tree = self.table.tree
-            tree.configure(style="Phong.Treeview")
-            tree.tag_configure("odd", background="#F7FAFE", foreground=TEXT)
-            tree.tag_configure("even", background=WHITE, foreground=TEXT)
-            tree.tag_configure("active_status", foreground=GREEN)
-            tree.tag_configure("maintenance", foreground=ORANGE)
-            self._stripe_rows()
-
-    def _style_children(self, parent):
-        for widget in parent.winfo_children():
-            if isinstance(widget, ttk.Frame):
-                try:
-                    widget.configure(style="Phong.TFrame")
-                except tk.TclError:
-                    pass
-                self._style_children(widget)
-            elif isinstance(widget, ttk.Label):
-                current = str(widget.cget("style"))
-                if "Title" not in current:
-                    widget.configure(style="Phong.TLabel")
-            elif isinstance(widget, ttk.Button):
-                widget.configure(style="Phong.TButton")
-            elif isinstance(widget, ttk.Entry):
-                widget.configure(style="Phong.TEntry")
-            elif isinstance(widget, ttk.Combobox):
-                widget.configure(style="Phong.TCombobox")
-
-    def _stripe_rows(self):
-        if not hasattr(self, "table") or not hasattr(self.table, "tree"):
-            return
-        tree = self.table.tree
-        for index, item in enumerate(tree.get_children()):
-            values = tree.item(item, "values")
-            tags = ["odd" if index % 2 == 0 else "even"]
-            status = str(values[-1]).lower() if values else ""
-            if "bảo trì" in status or "bao tri" in status:
-                tags.append("maintenance")
-            elif "hoạt động" in status or "hoat dong" in status:
-                tags.append("active_status")
-            tree.item(item, tags=tuple(tags))
-
-    def refresh(self):
-        super().refresh()
-        self._stripe_rows()
-        if hasattr(self, "_update_stats"):
-            self._update_stats()
+def stats(rooms):
+    """Phòng bảo trì không tính vào sức chứa, nên giường trống / tỷ lệ chỉ tính trên phòng đang hoạt động."""
+    act = [r for r in rooms if r["TrangThai"] != "Bảo trì"]
+    cap = sum(r["SoGiuong"] for r in act)
+    occ = sum(min(r["DangO"], r["SoGiuong"]) for r in act)
+    return {"total": len(rooms), "free": cap - occ, "rate": round(occ * 100 / cap) if cap else 0,
+            "maint": len(rooms) - len(act)}
 
 
-# ==============================
-# QUẢN LÝ LOẠI PHÒNG
-# ==============================
-class LoaiPhongScreen(_PhongStyle, CrudScreen):
-    title = "QUẢN LÝ LOẠI PHÒNG"
+def fit(text, maxw, font):
+    text = str(text)
+    if font.measure(text) <= maxw:
+        return text
+    while text and font.measure(text + "…") > maxw:
+        text = text[:-1]
+    return text + "…" if text else ""
 
-    columns = [
-        ("MaLoai", "Mã", 65),
-        ("TenLoai", "Tên loại phòng", 220),
-        ("SoGiuong", "Số giường", 100),
-        ("GiaThue", "Giá thuê (đ/người/tháng)", 190),
-    ]
 
-    FIELDS = [
-        ("TenLoai", "Tên loại phòng", "entry", None),
-        ("SoGiuong", "Số giường", "entry", None),
-        ("GiaThue", "Giá thuê (đ/người/tháng)", "entry", None),
-    ]
+# ---------------------------------------------------------------------- loại phòng (giữ nguyên)
+class LoaiPhongScreen(CrudScreen):
+    title = "Loại phòng"
+    columns = [("MaLoai", "Mã", 50), ("TenLoai", "Tên loại", 200), ("SoGiuong", "Số giường", 90),
+               ("GiaThue", "Giá thuê (đ/người/tháng)", 180)]
+    FIELDS = [("TenLoai", "Tên loại phòng", "entry", None),
+              ("SoGiuong", "Số giường", "entry", None),
+              ("GiaThue", "Giá thuê (đ/người/tháng)", "entry", None)]
 
     def rows(self, kw):
-        return [
-            dict(r, GiaThue=money(r["GiaThue"]))
-            for r in db.query(
-                "SELECT * FROM LoaiPhong WHERE TenLoai LIKE ? ORDER BY MaLoai",
-                (f"%{kw}%",)
-            )
-        ]
+        return [dict(r, GiaThue=money(r["GiaThue"])) for r in
+                db.query("SELECT * FROM LoaiPhong WHERE TenLoai LIKE ? ORDER BY MaLoai", (f"%{kw}%",))]
 
     def _check(self, d):
-        if not d["TenLoai"].strip():
+        if not d["TenLoai"]:
             return "Tên loại không được để trống."
         if not (d["SoGiuong"].isdigit() and int(d["SoGiuong"]) > 0):
             return "Số giường phải là số nguyên dương."
@@ -284,265 +86,417 @@ class LoaiPhongScreen(_PhongStyle, CrudScreen):
             return "Giá thuê phải là số nguyên dương."
 
     def add(self):
-        d = modern_form_dialog(self, "Thêm loại phòng", self.FIELDS)
+        d = form_dialog(self, "Thêm loại phòng", self.FIELDS)
         if d:
             err = self._check(d)
             if err:
                 return error(err)
-            db.execute(
-                "INSERT INTO LoaiPhong(TenLoai,SoGiuong,GiaThue) VALUES(?,?,?)",
-                (d["TenLoai"].strip(), int(d["SoGiuong"]), int(d["GiaThue"]))
-            )
+            db.execute("INSERT INTO LoaiPhong(TenLoai,SoGiuong,GiaThue) VALUES(?,?,?)",
+                       (d["TenLoai"], int(d["SoGiuong"]), int(d["GiaThue"])))
 
     def edit(self, id_):
         cur = dict(db.query("SELECT * FROM LoaiPhong WHERE MaLoai=?", (id_,), one=True))
-        d = modern_form_dialog(self, "Cập nhật loại phòng", self.FIELDS, cur)
+        d = form_dialog(self, "Sửa loại phòng", self.FIELDS, cur)
         if d:
             err = self._check(d)
             if err:
                 return error(err)
-            db.execute(
-                "UPDATE LoaiPhong SET TenLoai=?,SoGiuong=?,GiaThue=? WHERE MaLoai=?",
-                (d["TenLoai"].strip(), int(d["SoGiuong"]), int(d["GiaThue"]), id_)
-            )
+            db.execute("UPDATE LoaiPhong SET TenLoai=?,SoGiuong=?,GiaThue=? WHERE MaLoai=?",
+                       (d["TenLoai"], int(d["SoGiuong"]), int(d["GiaThue"]), id_))
 
     def delete(self, id_):
         db.execute("DELETE FROM LoaiPhong WHERE MaLoai=?", (id_,))
 
 
-# ==============================
-# QUẢN LÝ PHÒNG (GIAO DIỆN GIỐNG ẢNH)
-# ==============================
-class PhongScreen(_PhongStyle, CrudScreen):
-    title = "QUẢN LÝ PHÒNG"
+# ---------------------------------------------------------------------- bảng danh sách
+class RoomTable(DataTable):
+    bold_keys, navy_keys = ("TenPhong",), ("TenPhong",)
 
-    columns = [
-        ("MaPhong", "Mã", 60),
-        ("TenPhong", "Tên phòng", 110),
-        ("TenLoai", "Loại phòng", 140),
-        ("Tang", "Tầng", 60),
-        ("SoGiuong", "Số giường", 85),
-        ("DangO", "Đang ở", 75),
-        ("GiaThue", "Giá/người/tháng", 140),
-        ("TinhTrang", "Trạng thái", 110),
-    ]
+    def __init__(self, master, on_select, on_open):
+        super().__init__(master, on_select, on_open, ROOM_COLS, "MaPhong")
 
-    extra = [
-        ("🏷 Quản lý loại phòng", "open_loai")
-    ]
+    def _draw_cell(self, key, r, tx, cy, maxw, tag):
+        b = self.body
+        if key == "TinhTrang":
+            fg, fill = STATUS_STYLE[r["TinhTrang"]]
+            self._badge(r["TinhTrang"], fg, fill, tx, cy, maxw, tag)
+            return True
+        if key == "DangO":                              # thanh tiến độ + "3/4"
+            bw = max(24, min(72, maxw - 44))
+            frac = min(r["DangO"] / r["SoGiuong"], 1) if r["SoGiuong"] else 0
+            color = BAR_FULL if r["TinhTrang"] == "Đầy" else BAR_OK
+            rounded_rect(b, tx, cy - 3, tx + bw, cy + 3, 3, fill=TRACK, outline=TRACK, tags=tag)
+            if frac > 0:
+                rounded_rect(b, tx, cy - 3, tx + max(6, bw * frac), cy + 3, 3, fill=color, outline=color, tags=tag)
+            b.create_text(tx + bw + 10, cy, text=f"{r['DangO']}/{r['SoGiuong']}", anchor="w", font=self.f_bold,
+                          fill=TEXT, tags=tag)
+            return True
+        return False
 
-    def __init__(self, master, *args, **kwargs):
-        super().__init__(master, *args, **kwargs)
-        self._build_header_and_stats()
 
-    def _build_header_and_stats(self):
-        # Xóa header mặc định của CrudScreen nếu có
-        for child in self.winfo_children():
-            if isinstance(child, ttk.Frame) and child != getattr(self, "table", None):
-                pass
+# ---------------------------------------------------------------------- sơ đồ giường
+TILE_W, GAP, BED_W, BED_H = 264, 16, 116, 28
 
-        # ===== HEADER =====
-        header = tk.Frame(self, bg=BG)
-        header.pack(fill="x", padx=20, pady=(16, 8), before=self.table if hasattr(self, "table") else None)
 
-        # Tiêu đề + mô tả
-        title_frame = tk.Frame(header, bg=BG)
-        title_frame.pack(side="left", fill="y")
+class BedMap(tk.Frame):
+    """Sơ đồ giường: mỗi phòng là một ô, mỗi giường là một ô nhỏ (tên sinh viên hoặc 'Trống'), nhóm theo tầng."""
 
-        tk.Label(
-            title_frame, text="Quản lý phòng",
-            font=("Segoe UI", 18, "bold"),
-            fg=HUIT_BLUE_DARK, bg=BG
-        ).pack(anchor="w")
+    def __init__(self, master, on_select, on_open):
+        super().__init__(master, bg="white")
+        self.on_select, self.on_open = on_select, on_open
+        self.rooms, self.selected, self._hit, self._total = [], None, [], 1
+        self.f_head = tkfont.Font(family=FONT, size=11, weight="bold")
+        self.f_title = tkfont.Font(family=FONT, size=12, weight="bold")
+        self.f_norm = tkfont.Font(family=FONT, size=9)
+        self.f_bed = tkfont.Font(family=FONT, size=9, weight="bold")
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
+        self.cv = tk.Canvas(self, bg="white", highlightthickness=0, yscrollincrement=24)
+        self.cv.grid(row=0, column=0, sticky="nsew")
+        self.sb = ttk.Scrollbar(self, orient="vertical", command=self.cv.yview)
+        self.cv.configure(yscrollcommand=self._on_scroll)
+        self.cv.bind("<Configure>", lambda _e: self._draw())
+        self.cv.bind("<Button-1>", self._click)
+        self.cv.bind("<Double-1>", self._double)
+        for ev in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.cv.bind(ev, self._wheel)
 
-        tk.Label(
-            title_frame,
-            text="Theo dõi tình trạng phòng, giường trống và giá thuê",
-            font=("Segoe UI", 9), fg=MUTED, bg=BG
-        ).pack(anchor="w", pady=(2, 0))
+    def load(self, rooms):
+        self.rooms = rooms
+        if self.selected is not None and all(r["MaPhong"] != self.selected for r in rooms):
+            self.selected = None
+            self.on_select(None)
+        self._draw()
 
-        # Nút + Thêm
-        btn_add = tk.Button(
-            header, text="+ Thêm",
-            font=("Segoe UI", 10, "bold"),
-            fg=WHITE, bg=HUIT_BLUE,
-            activebackground=HUIT_BLUE_DARK, activeforeground=WHITE,
-            relief="flat", padx=16, pady=8, cursor="hand2",
-            command=self.add
-        )
-        btn_add.pack(side="right", padx=(8, 0))
+    def select(self, ma, scroll=False):
+        old, self.selected = self.selected, ma
+        self._draw()
+        if scroll and ma is not None:
+            box = next((h for h in self._hit if h[4] == ma), None)
+            if box and self._total > self.cv.winfo_height():
+                top = self.cv.canvasy(0)
+                if box[1] < top or box[3] > top + self.cv.winfo_height():
+                    self.cv.yview_moveto(max(0.0, (box[1] - GAP) / self._total))
+        if old != ma:
+            self.on_select(ma)
 
-        # ===== STATS CARDS =====
-        stats = tk.Frame(self, bg=BG)
-        stats.pack(fill="x", padx=20, pady=(4, 12))
+    @staticmethod
+    def _tile_h(r):
+        return 62 + ceil(max(r["SoGiuong"], 1) / 2) * (BED_H + 8) + 8
 
-        def make_card(parent, title, value, unit="", color=HUIT_BLUE_DARK):
-            card = tk.Frame(parent, bg=WHITE, highlightbackground=BORDER, highlightthickness=1)
-            card.pack(side="left", fill="both", expand=True, padx=(0, 12))
+    def _draw(self):
+        cv = self.cv
+        cv.delete("all")
+        self._hit = []
+        w = max(cv.winfo_width(), 1)
+        if not self.rooms:
+            cv.create_text(w / 2, 70, text="Không có phòng nào phù hợp.", fill=MUTED, font=self.f_norm)
+            self._total = 1
+            cv.configure(scrollregion=(0, 0, w, 1))
+            return
+        per, y = max(1, (w - GAP) // (TILE_W + GAP)), GAP
+        for fl in sorted({r["Tang"] for r in self.rooms}):
+            cv.create_text(GAP, y + 10, text=f"Tầng {fl}", anchor="w", font=self.f_head, fill=NAVY)
+            y += 32
+            group = [r for r in self.rooms if r["Tang"] == fl]
+            for i in range(0, len(group), per):
+                line = group[i:i + per]
+                h = max(self._tile_h(r) for r in line)
+                for k, r in enumerate(line):
+                    self._tile(r, GAP + k * (TILE_W + GAP), y, h)
+                y += h + GAP
+            y += 4
+        self._total = y
+        cv.configure(scrollregion=(0, 0, w, y))
 
-            inner = tk.Frame(card, bg=WHITE, padx=16, pady=12)
-            inner.pack(fill="both", expand=True)
+    def _tile(self, r, x, y, h):
+        cv, sel = self.cv, r["MaPhong"] == self.selected
+        rounded_rect(cv, x, y, x + TILE_W, y + h, 12, fill=SEL_BG if sel else "#FAFCFF",
+                     outline=PRIMARY if sel else BORDER, width=2 if sel else 1)
+        cv.create_text(x + 16, y + 24, text=r["TenPhong"], anchor="w", font=self.f_title, fill=NAVY)
+        fg, fill = STATUS_STYLE[r["TinhTrang"]]
+        bw = self.f_bed.measure(r["TinhTrang"]) + 20
+        rounded_rect(cv, x + TILE_W - 16 - bw, y + 12, x + TILE_W - 16, y + 36, 12, fill=fill, outline=fill)
+        cv.create_text(x + TILE_W - 16 - bw / 2, y + 24, text=r["TinhTrang"], font=self.f_bed, fill=fg)
+        cv.create_text(x + 16, y + 46, anchor="w", font=self.f_norm, fill=MUTED,
+                       text=fit(f"{r['TenLoai']} · {r['Gia']} đ/tháng · {r['DangO']}/{r['SoGiuong']}",
+                                TILE_W - 32, self.f_norm))
+        maint = r["TrangThai"] == "Bảo trì"
+        for i in range(r["SoGiuong"]):
+            bx, by = x + 16 + (i % 2) * (BED_W + 8), y + 62 + (i // 2) * (BED_H + 8)
+            if i < len(r["Nguoi"]):
+                rounded_rect(cv, bx, by, bx + BED_W, by + BED_H, 8, fill="#DCE9FB", outline="#B9D0F5")
+                cv.create_text(bx + 10, by + BED_H / 2, anchor="w", font=self.f_bed, fill=NAVY,
+                               text=fit(r["Nguoi"][i], BED_W - 20, self.f_bed))
+            else:
+                rounded_rect(cv, bx, by, bx + BED_W, by + BED_H, 8, fill="#F1F3F7" if maint else "white",
+                             outline="#D5DBE6" if maint else "#BFE3CB")
+                cv.create_text(bx + 10, by + BED_H / 2, anchor="w", font=self.f_norm,
+                               fill="#8A94A6" if maint else GREEN_FG, text="Không dùng" if maint else "Trống")
+        self._hit.append((x, y, x + TILE_W, y + h, r["MaPhong"]))
 
-            tk.Label(inner, text=title, font=("Segoe UI", 9), fg=MUTED, bg=WHITE).pack(anchor="w")
-            val_frame = tk.Frame(inner, bg=WHITE)
-            val_frame.pack(anchor="w", pady=(4, 0))
-            tk.Label(val_frame, text=str(value), font=("Segoe UI", 22, "bold"), fg=color, bg=WHITE).pack(side="left")
-            if unit:
-                tk.Label(val_frame, text=unit, font=("Segoe UI", 11), fg=MUTED, bg=WHITE).pack(side="left", padx=(4, 0), pady=(6, 0))
-            return card
+    def _room_at(self, e):
+        cy = self.cv.canvasy(e.y)
+        return next((h[4] for h in self._hit if h[0] <= e.x <= h[2] and h[1] <= cy <= h[3]), None)
 
-        self.card_total = make_card(stats, "Tổng số phòng", "0")
-        self.card_empty = make_card(stats, "Phòng đang trống", "0", color=GREEN)
-        self.card_rate = make_card(stats, "Tỷ lệ lấp đầy", "0", "%", color=HUIT_BLUE)
+    def _click(self, e):
+        ma = self._room_at(e)
+        if ma is not None:
+            self.select(ma)
 
-        # Lưu reference để cập nhật
-        self.lbl_total = self.card_total.winfo_children()[0].winfo_children()[1].winfo_children()[0]
-        self.lbl_empty = self.card_empty.winfo_children()[0].winfo_children()[1].winfo_children()[0]
-        self.lbl_rate = self.card_rate.winfo_children()[0].winfo_children()[1].winfo_children()[0]
+    def _double(self, e):
+        ma = self._room_at(e)
+        if ma is not None:
+            self.select(ma)
+            self.on_open()
 
-        # ===== THANH TÌM KIẾM =====
-        search_frame = tk.Frame(self, bg=BG)
-        search_frame.pack(fill="x", padx=20, pady=(0, 10))
+    def _wheel(self, e):
+        step = -1 if (getattr(e, "num", 0) == 4 or getattr(e, "delta", 0) > 0) else 1
+        self.cv.yview_scroll(step * 2, "units")
 
-        self.search_var = tk.StringVar()
-        search_entry = ttk.Entry(search_frame, textvariable=self.search_var, font=("Segoe UI", 10))
-        search_entry.pack(side="left", fill="x", expand=True, ipady=6)
-        search_entry.insert(0, "Tìm theo tên phòng, loại phòng...")
-        search_entry.config(foreground=MUTED)
+    def _on_scroll(self, first, last):
+        self.sb.set(first, last)
+        if float(first) > 0 or float(last) < 1:
+            self.sb.grid(row=0, column=1, sticky="ns")
+        else:
+            self.sb.grid_remove()
 
-        def on_focus_in(e):
-            if search_entry.get() == "Tìm theo tên phòng, loại phòng...":
-                search_entry.delete(0, "end")
-                search_entry.config(foreground=TEXT)
 
-        def on_focus_out(e):
-            if not search_entry.get().strip():
-                search_entry.insert(0, "Tìm theo tên phòng, loại phòng...")
-                search_entry.config(foreground=MUTED)
+# ---------------------------------------------------------------------- màn hình
+class PhongScreen(tk.Frame):
+    def __init__(self, master, user=None):
+        super().__init__(master, bg=PAGE_BG)
+        self.user = user
+        self.filter, self.floor, self.view, self.sel, self._rate = FILTERS[0], ALL_FLOORS, "list", None, 0
+        self.rows, self.shown, self.counts = [], [], {n: 0 for n in FILTERS}
+        self.kw = tk.StringVar(master=self)          # main.goto() điền sẵn ô tìm kiếm qua biến này
+        self._build()
+        self.refresh()
+        self.kw.trace_add("write", lambda *_: self.apply())
 
-        search_entry.bind("<FocusIn>", on_focus_in)
-        search_entry.bind("<FocusOut>", on_focus_out)
-        search_entry.bind("<KeyRelease>", lambda e: self.refresh())
+    # ---- dựng giao diện
+    def _build(self):
+        pad = dict(padx=40)
+        head = tk.Frame(self, bg=PAGE_BG)
+        head.pack(fill="x", pady=(30, 0), **pad)
+        box = tk.Frame(head, bg=PAGE_BG)
+        box.pack(side="left")
+        tk.Label(box, text="Quản lý phòng", bg=PAGE_BG, fg=NAVY, font=(FONT, 20, "bold")).pack(anchor="w")
+        tk.Label(box, text="Theo dõi tình trạng phòng, giường trống và giá thuê", bg=PAGE_BG, fg=MUTED,
+                 font=(FONT, 10)).pack(anchor="w")
+        SearchBox(head, self.kw, "Tìm theo tên phòng, loại phòng...").pack(side="right", anchor="n")
 
-        # Gọi cập nhật thống kê lần đầu
-        self.after(100, self._update_stats)
+        self.stats = tk.Frame(self, bg=PAGE_BG)
+        self.stats.pack(fill="x", pady=(16, 0), **pad)
+        for i in range(4):
+            self.stats.columnconfigure(i, weight=1, uniform="s")
+        self.v_total = self._stat(0, "Tổng số phòng", NAVY)
+        self.v_free = self._stat(1, "Giường còn trống", GREEN_FG)
+        self.v_rate = self._stat(2, "Tỷ lệ lấp đầy", NAVY, bar=True)
+        self.v_maint = self._stat(3, "Phòng đang bảo trì", MAINT_FG)
 
-    def _update_stats(self):
-        try:
-            rooms = db.danh_sach_phong()
-            total = len(rooms)
-            empty = sum(1 for r in rooms if str(r.get("DangO", "0")) in ("0", "0/0") or "trống" in str(r.get("TinhTrang", "")).lower())
-            # Tính tỷ lệ lấp đầy đơn giản
-            filled = 0
-            capacity = 0
-            for r in rooms:
-                try:
-                    dang_o = str(r.get("DangO", "0")).split("/")[0]
-                    so_giuong = int(r.get("SoGiuong", 0) or 0)
-                    filled += int(dang_o)
-                    capacity += so_giuong
-                except:
-                    pass
-            rate = round(filled / capacity * 100) if capacity > 0 else 0
+        bar = tk.Frame(self, bg=PAGE_BG)
+        bar.pack(fill="x", pady=(16, 0), **pad)
+        IconButton(bar, "Thêm", "plus", self.on_add, "primary").pack(side="left", padx=(0, 10))
+        self.btn_edit = IconButton(bar, "Sửa", "edit", self.on_edit, "outline", enabled=False)
+        self.btn_edit.pack(side="left", padx=(0, 10))
+        self.btn_del = IconButton(bar, "Xóa", "trash", self.on_delete, "danger", enabled=False)
+        self.btn_del.pack(side="left", padx=(0, 10))
+        IconButton(bar, "Loại phòng", "list", self.on_types, "outline").pack(side="left")
+        self.view_chips = {}
+        for key in ("map", "list"):                  # pack phải: "Sơ đồ giường" nằm ngoài cùng bên phải
+            self.view_chips[key] = Chip(bar, lambda k=key: self.set_view(k))
+            self.view_chips[key].pack(side="right", padx=(10, 0) if key == "map" else 0)
 
-            self.lbl_total.config(text=str(total))
-            self.lbl_empty.config(text=str(empty))
-            self.lbl_rate.config(text=str(rate))
-        except Exception:
-            pass
+        chips = tk.Frame(self, bg=PAGE_BG)
+        chips.pack(fill="x", pady=(14, 14), **pad)
+        self.chips = {}
+        for name in FILTERS:
+            self.chips[name] = Chip(chips, lambda n=name: self.set_filter(n))
+            self.chips[name].pack(side="left", padx=(0, 10))
+        self.floor_var = tk.StringVar(master=self, value=ALL_FLOORS)
+        self.floor_cb = ttk.Combobox(chips, textvariable=self.floor_var, state="readonly", width=16,
+                                     values=[ALL_FLOORS], font=(FONT, 10))
+        self.floor_cb.pack(side="left", ipady=7)
+        self.floor_cb.bind("<<ComboboxSelected>>", lambda _e: self.set_floor(self.floor_var.get()))
 
-    def rows(self, kw):
-        out = []
-        keyword = (kw or "").strip().lower()
-        if keyword == "tìm theo tên phòng, loại phòng...":
-            keyword = ""
+        card = Card(self)
+        card.pack(fill="both", expand=True, padx=40, pady=(0, 30))
+        foot = tk.Frame(card.inner, bg="white")
+        foot.pack(side="bottom", fill="x")
+        tk.Frame(foot, bg=LINE, height=1).pack(fill="x")
+        row = tk.Frame(foot, bg="white")
+        row.pack(fill="x", padx=16, pady=10)
+        self.foot_l = tk.Label(row, bg="white", fg=MUTED, font=(FONT, 9))
+        self.foot_l.pack(side="left")
+        tk.Label(row, text="Bấm vào một dòng để chọn, sau đó dùng nút Sửa hoặc Xóa", bg="white", fg=MUTED,
+                 font=(FONT, 9)).pack(side="right")
+        self.table = RoomTable(card.inner, self._on_pick, self.on_edit)
+        self.bedmap = BedMap(card.inner, self._on_pick, self.on_edit)
+        self.table.pack(fill="both", expand=True)
 
-        for p in db.danh_sach_phong():
-            searchable = " ".join([
-                str(p.get("MaPhong", "")),
-                str(p.get("TenPhong", "")),
-                str(p.get("TenLoai", "")),
-                str(p.get("Tang", "")),
-                str(p.get("TinhTrang", ""))
-            ]).lower()
-            if not keyword or keyword in searchable:
-                out.append(dict(p, GiaThue=money(p["GiaThue"])))
-        return out
+    def _stat(self, col, title, color, bar=False):
+        c = Card(self.stats)
+        c.config(height=108)
+        c.grid(row=0, column=col, sticky="nsew", padx=(0 if col == 0 else 16, 0))
+        tk.Label(c.inner, text=title, bg="white", fg=MUTED, font=(FONT, 10, "bold")).pack(anchor="w", padx=18,
+                                                                                         pady=(14, 0))
+        val = tk.Label(c.inner, text="0", bg="white", fg=color, font=(FONT, 24, "bold"))
+        val.pack(anchor="w", padx=18)
+        if bar:
+            self.rate_bar = tk.Canvas(c.inner, height=8, bg="white", highlightthickness=0)
+            self.rate_bar.pack(fill="x", padx=18)
+            self.rate_bar.bind("<Configure>", lambda _e: self._paint_bar())
+        return val
 
-    def on_extra(self, method):
-        if method == "open_loai":
-            win = tk.Toplevel(self)
-            win.title("Quản lý loại phòng")
-            win.geometry("820x500")
-            win.minsize(680, 420)
-            win.configure(bg=BG)
-            LoaiPhongScreen(win).pack(fill="both", expand=True)
-            win.transient(self.winfo_toplevel())
-            win.grab_set()
-            win.wait_window()
-            self.refresh()
+    def _paint_bar(self):
+        cv, w = self.rate_bar, max(self.rate_bar.winfo_width(), 1)
+        cv.delete("all")
+        rounded_rect(cv, 0, 1, w, 7, 3, fill=TRACK, outline=TRACK)
+        if self._rate > 0:
+            rounded_rect(cv, 0, 1, max(6, w * min(self._rate, 100) / 100), 7, 3, fill=BAR_OK, outline=BAR_OK)
 
+    # ---- dữ liệu / bộ lọc
+    def refresh(self):
+        self.rows = load_rooms()
+        self.counts = {n: sum(1 for r in self.rows if n == FILTERS[0] or r["TinhTrang"] == n) for n in FILTERS}
+        s = stats(self.rows)
+        self.v_total.config(text=str(s["total"]))
+        self.v_free.config(text=str(s["free"]))
+        self.v_rate.config(text=f"{s['rate']}%")
+        self.v_maint.config(text=str(s["maint"]))
+        self._rate = s["rate"]
+        self._paint_bar()
+        floors = [f"Tầng {t}" for t in sorted({r["Tang"] for r in self.rows})]
+        self.floor_cb.config(values=[ALL_FLOORS] + floors)
+        if self.floor not in floors:
+            self.floor = ALL_FLOORS
+            self.floor_var.set(ALL_FLOORS)
+        self.apply()
+
+    def set_filter(self, name):
+        if name in FILTERS:
+            self.filter = name
+            self.apply()
+
+    def set_floor(self, name):
+        self.floor = name
+        self.apply()
+
+    def set_view(self, key):
+        if key == self.view:
+            return
+        self.view = key
+        shown, hidden = (self.table, self.bedmap) if key == "list" else (self.bedmap, self.table)
+        hidden.pack_forget()
+        shown.selected = self.sel
+        shown.pack(fill="both", expand=True)
+        self.apply()
+
+    def apply(self):
+        kw = fold(self.kw.get().strip())
+        fl = None if self.floor == ALL_FLOORS else int(self.floor.split()[-1])
+        self.shown = [r for r in self.rows
+                      if (self.filter == FILTERS[0] or r["TinhTrang"] == self.filter)
+                      and (fl is None or r["Tang"] == fl) and (not kw or kw in r["_hay"])]
+        for name, chip in self.chips.items():
+            chip.set(f"{name} ({self.counts[name]})", name == self.filter)
+        self.view_chips["list"].set("Danh sách", self.view == "list")
+        self.view_chips["map"].set("Sơ đồ giường", self.view == "map")
+        for w in (self.table, self.bedmap):          # đồng bộ dòng đang chọn giữa hai kiểu xem
+            w.selected = self.sel
+            w.load(self.shown)
+        self.foot_l.config(text=f"Hiển thị {len(self.shown)} / {len(self.rows)} phòng")
+
+    def _on_pick(self, ma):
+        self.sel = ma
+        self.btn_edit.set_enabled(ma is not None)
+        self.btn_del.set_enabled(ma is not None)
+
+    def _room(self, ma):
+        return next((r for r in self.rows if r["MaPhong"] == ma), None)
+
+    # ---- thêm / sửa / xóa
     def _loai_opts(self):
-        return [
-            f"{r['MaLoai']} - {r['TenLoai']} ({r['SoGiuong']} giường)"
-            for r in db.query("SELECT * FROM LoaiPhong ORDER BY MaLoai")
-        ]
+        return [f"{r['MaLoai']} - {r['TenLoai']} ({r['SoGiuong']} giường)"
+                for r in db.query("SELECT * FROM LoaiPhong ORDER BY MaLoai")]
 
     def _fields(self):
-        return [
-            ("TenPhong", "Tên phòng", "entry", None),
-            ("Loai", "Loại phòng", "combo", self._loai_opts()),
-            ("Tang", "Tầng", "entry", None),
-            ("TrangThai", "Trạng thái", "combo", ["Hoạt động", "Bảo trì"])
-        ]
+        return [("TenPhong", "Tên phòng", "entry", None),
+                ("Loai", "Loại phòng", "combo", self._loai_opts()),
+                ("Tang", "Tầng", "entry", None),
+                ("TrangThai", "Trạng thái", "combo", ["Hoạt động", "Bảo trì"])]
 
     def _check(self, d, id_=None):
-        if not d["TenPhong"].strip():
+        if not d["TenPhong"]:
             return "Tên phòng không được để trống."
-        if not d["Tang"].isdigit() or int(d["Tang"]) < 0:
-            return "Tầng phải là số nguyên không âm."
-        dup = db.query(
-            "SELECT MaPhong FROM Phong WHERE TenPhong=? AND MaPhong<>?",
-            (d["TenPhong"].strip(), id_ or 0),
-            one=True
-        )
-        if dup:
+        if not d["Tang"].isdigit():
+            return "Tầng phải là số nguyên."
+        if db.query("SELECT MaPhong FROM Phong WHERE TenPhong=? AND MaPhong<>?", (d["TenPhong"], id_ or 0), one=True):
             return "Tên phòng đã tồn tại."
+        return None
 
-    def add(self):
+    def on_add(self):
         if not self._loai_opts():
-            return error("Hãy thêm loại phòng trước (nút Quản lý loại phòng).")
+            return error("Hãy thêm loại phòng trước (nút Loại phòng).")
+        d = form_dialog(self, "Thêm phòng", self._fields())
+        if not d:
+            return
+        err = self._check(d)
+        if err:
+            return error(err)
+        new_id = db.execute("INSERT INTO Phong(TenPhong,MaLoai,Tang,TrangThai) VALUES(?,?,?,?)",
+                            (d["TenPhong"], pick_id(d["Loai"]), int(d["Tang"]), d["TrangThai"]))
+        self.filter, self.floor = FILTERS[0], ALL_FLOORS
+        self.floor_var.set(ALL_FLOORS)
+        self.kw.set("")
+        self.refresh()
+        (self.table if self.view == "list" else self.bedmap).select(new_id, scroll=True)
 
-        d = modern_form_dialog(self, "Thêm phòng", self._fields())
-        if d:
-            err = self._check(d)
-            if err:
-                return error(err)
-            db.execute(
-                "INSERT INTO Phong(TenPhong,MaLoai,Tang,TrangThai) VALUES(?,?,?,?)",
-                (d["TenPhong"].strip(), pick_id(d["Loai"]), int(d["Tang"]), d["TrangThai"])
-            )
-            self.refresh()
-
-    def edit(self, id_):
-        cur = dict(db.query("SELECT * FROM Phong WHERE MaPhong=?", (id_,), one=True))
+    def on_edit(self):
+        r = self._room(self.sel)
+        if not r:
+            return
+        cur = dict(db.query("SELECT * FROM Phong WHERE MaPhong=?", (r["MaPhong"],), one=True))
         opts = self._loai_opts()
-        if not opts:
-            return error("Chưa có dữ liệu loại phòng.")
-
         cur["Loai"] = next((o for o in opts if pick_id(o) == cur["MaLoai"]), opts[0])
+        d = form_dialog(self, "Cập nhật phòng", self._fields(), cur)
+        if not d:
+            return
+        err = self._check(d, r["MaPhong"])
+        if err:
+            return error(err)
+        beds = db.query("SELECT SoGiuong FROM LoaiPhong WHERE MaLoai=?", (pick_id(d["Loai"]),), one=True)["SoGiuong"]
+        if beds < r["DangO"]:
+            return error(f"Phòng đang có {r['DangO']} sinh viên ở, không thể đổi sang loại chỉ có {beds} giường.")
+        if d["TrangThai"] == "Bảo trì" and r["DangO"] and not messagebox.askyesno(
+                "Xác nhận", f"Phòng {r['TenPhong']} đang có {r['DangO']} sinh viên ở. Vẫn chuyển sang bảo trì?"):
+            return
+        db.execute("UPDATE Phong SET TenPhong=?,MaLoai=?,Tang=?,TrangThai=? WHERE MaPhong=?",
+                   (d["TenPhong"], pick_id(d["Loai"]), int(d["Tang"]), d["TrangThai"], r["MaPhong"]))
+        self.refresh()
 
-        d = modern_form_dialog(self, "Cập nhật thông tin phòng", self._fields(), cur)
-        if d:
-            err = self._check(d, id_)
-            if err:
-                return error(err)
-            db.execute(
-                "UPDATE Phong SET TenPhong=?,MaLoai=?,Tang=?,TrangThai=? WHERE MaPhong=?",
-                (d["TenPhong"].strip(), pick_id(d["Loai"]), int(d["Tang"]), d["TrangThai"], id_)
-            )
-            self.refresh()
+    def on_delete(self):
+        r = self._room(self.sel)
+        if not r:
+            return
+        if r["DangO"]:
+            return error(f"Phòng {r['TenPhong']} đang có {r['DangO']} sinh viên ở.\n"
+                         "Hãy kết thúc hợp đồng của họ trước khi xóa phòng.")
+        if not messagebox.askyesno("Xác nhận", f"Bạn có chắc chắn muốn xóa phòng {r['TenPhong']}?"):
+            return
+        try:
+            db.execute("DELETE FROM Phong WHERE MaPhong=?", (r["MaPhong"],))
+        except sqlite3.IntegrityError:
+            error("Không thể xóa vì phòng này còn hợp đồng hoặc hóa đơn liên quan.")
+        self.refresh()
 
-    def delete(self, id_):
-        db.execute("DELETE FROM Phong WHERE MaPhong=?", (id_,))
+    def on_types(self):
+        win = tk.Toplevel(self)
+        win.title("Loại phòng")
+        win.geometry("640x420")
+        LoaiPhongScreen(win).pack(fill="both", expand=True)
+        win.transient(self.winfo_toplevel())
+        win.grab_set()
+        win.wait_window()
         self.refresh()
