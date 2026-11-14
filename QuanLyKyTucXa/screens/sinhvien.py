@@ -5,7 +5,8 @@ File này cũng chứa các thành phần giao diện dùng chung mà trang Phò
 
 - Danh sách sinh viên + phòng đang ở (huy hiệu xanh), tìm kiếm tức thì (không dấu cũng tìm được)
 - Lọc nhanh: Tất cả / Đang ở KTX / Chưa xếp phòng
-- Thêm / Sửa / Xóa (kiểm tra dữ liệu, nhập sai thì giữ lại nội dung để sửa)
+- Thêm / Sửa / Xóa bằng hộp thoại modal (screens/modal.py): có Mã SV, CCCD, Email; nhập sai thì báo lỗi ngay
+  trong hộp thoại và giữ nguyên nội dung đã gõ
 - Nhập / Xuất Excel (.xlsx, chỉ dùng thư viện chuẩn) và CSV
 """
 import csv
@@ -19,7 +20,8 @@ from tkinter import font as tkfont
 
 import database as db
 from screens import xlsx_io
-from screens.base import error, form_dialog, parse_date
+from screens.base import error, parse_date
+from screens.modal import form_modal
 from screens.login import (BORDER, FONT, INPUT_BORDER, MUTED, NAVY, PAGE_BG, PLACEHOLDER, PRIMARY, SEL_BG, TEXT,
                            rounded_rect)
 
@@ -325,11 +327,31 @@ FILTERS = ["Tất cả", "Đang ở KTX", "Chưa xếp phòng"]
 STUDENT_COLS = [("MaSV", "Mã SV", 84, 0.7), ("HoTen", "Họ và tên", 160, 1.5), ("NgaySinh", "Ngày sinh", 104, 0.9),
                 ("GioiTinh", "Giới tính", 84, 0.7), ("Lop", "Lớp", 110, 1.0), ("SDT", "SĐT", 112, 1.0),
                 ("QueQuan", "Quê quán", 112, 1.1), ("Phong", "Phòng đang ở", 124, 1.0)]
-FIELDS = [("HoTen", "Họ và tên", "entry", None), ("NgaySinh", "Ngày sinh (dd/mm/yyyy)", "entry", None),
-          ("GioiTinh", "Giới tính", "combo", ["Nam", "Nữ"]), ("Lop", "Lớp", "entry", None),
-          ("SDT", "Số điện thoại", "entry", None), ("QueQuan", "Quê quán", "entry", None)]
-EXPORT_HEADERS = ["Mã SV", "Họ và tên", "Ngày sinh", "Giới tính", "Lớp", "SĐT", "Quê quán", "Phòng đang ở"]
-EXPORT_KEYS = ["MaSV", "HoTen", "NgaySinh", "GioiTinh", "Lop", "SDT", "QueQuan", "Phong"]
+# các cột dữ liệu của một sinh viên (không gồm MaSV) - dùng chung cho form, INSERT/UPDATE và nhập Excel
+SV_COLS = ("HoTen", "NgaySinh", "GioiTinh", "Lop", "SDT", "QueQuan", "CCCD", "Email")
+SQL_INSERT = f"INSERT INTO SinhVien(MaSV,{','.join(SV_COLS)}) VALUES(?{',?' * len(SV_COLS)})"
+SQL_INSERT_AUTO = f"INSERT INTO SinhVien({','.join(SV_COLS)}) VALUES(?{',?' * (len(SV_COLS) - 1)})"
+SQL_UPDATE = f"UPDATE SinhVien SET {','.join(c + '=?' for c in SV_COLS)} WHERE MaSV=?"
+
+
+def student_fields(editing=False):
+    """Các ô của hộp thoại Thêm / Cập nhật sinh viên (thứ tự và bố cục theo mẫu thiết kế).
+    Khi sửa, Mã SV chỉ đọc vì nó là khóa chính, hợp đồng và yêu cầu đang tham chiếu tới."""
+    return [{"key": "HoTen", "label": "Họ và tên", "ph": "Nguyễn Văn A", "required": True},
+            {"key": "MaSV", "label": "Mã sinh viên", "ph": "Nhập mã sinh viên", "required": True,
+             "readonly": editing},
+            {"key": "NgaySinh", "label": "Ngày sinh (dd/mm/yyyy)", "ph": "12/05/2005"},
+            {"key": "GioiTinh", "label": "Giới tính", "kind": "combo", "opts": ["Nam", "Nữ"]},
+            {"key": "CCCD", "label": "CCCD", "ph": "12 chữ số"},
+            {"key": "SDT", "label": "Số điện thoại", "ph": "09xxxxxxxx"},
+            {"key": "Lop", "label": "Lớp", "ph": "DHKTPM17A"},
+            {"key": "Email", "label": "Email", "ph": "ten@example.com"},
+            {"key": "QueQuan", "label": "Quê quán", "ph": "Xã/Phường, Tỉnh/Thành phố", "span": 2}]
+
+
+EXPORT_HEADERS = ["Mã SV", "Họ và tên", "Ngày sinh", "Giới tính", "Lớp", "SĐT", "Quê quán", "CCCD", "Email",
+                  "Phòng đang ở"]
+EXPORT_KEYS = ["MaSV", "HoTen", "NgaySinh", "GioiTinh", "Lop", "SDT", "QueQuan", "CCCD", "Email", "Phong"]
 # tên cột (đã bỏ dấu) chấp nhận khi nhập file
 ALIASES = {"MaSV": {"ma sv", "masv", "mssv", "ma sinh vien"},
            "HoTen": {"ho va ten", "ho ten", "hoten", "ten", "ten sinh vien"},
@@ -337,14 +359,17 @@ ALIASES = {"MaSV": {"ma sv", "masv", "mssv", "ma sinh vien"},
            "GioiTinh": {"gioi tinh", "gioitinh"},
            "Lop": {"lop"},
            "SDT": {"sdt", "so dien thoai", "dien thoai"},
-           "QueQuan": {"que quan", "quequan", "dia chi"}}
+           "QueQuan": {"que quan", "quequan", "dia chi"},
+           "CCCD": {"cccd", "so cccd", "can cuoc cong dan", "can cuoc"},
+           "Email": {"email", "e-mail", "mail", "thu dien tu"}}
+EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 
 def load_students():
     """Danh sách sinh viên + phòng đang ở (Phong, '' nếu chưa xếp) + cờ DangO."""
     out = []
     for r in db.query("""
-            SELECT s.MaSV, s.HoTen, s.NgaySinh, s.GioiTinh, s.Lop, s.SDT, s.QueQuan,
+            SELECT s.MaSV, s.HoTen, s.NgaySinh, s.GioiTinh, s.Lop, s.SDT, s.QueQuan, s.CCCD, s.Email,
                    (SELECT GROUP_CONCAT(p.TenPhong, ', ') FROM HopDong h JOIN Phong p ON p.MaPhong=h.MaPhong
                     WHERE h.MaSV=s.MaSV AND h.TrangThai='Đang thuê') AS Phong
             FROM SinhVien s ORDER BY s.MaSV"""):
@@ -376,14 +401,15 @@ def normalize_date(s):
     return d.strftime("%d/%m/%Y")
 
 
-def clean_student(d):
-    """Chuẩn hóa + kiểm tra dữ liệu một sinh viên. Trả về (dữ liệu sạch, thông báo lỗi hoặc None)."""
-    c = {k: re.sub(r"\s+", " ", str(d.get(k) or "")).strip() for k in ("HoTen", "NgaySinh", "GioiTinh", "Lop", "SDT", "QueQuan")}
+def check_student(d):
+    """Chuẩn hóa + kiểm tra dữ liệu một sinh viên.
+    Trả về (dữ liệu sạch, khóa ô bị lỗi, thông báo lỗi); không lỗi thì khóa và thông báo đều là None."""
+    c = {k: re.sub(r"\s+", " ", str(d.get(k) or "")).strip() for k in SV_COLS}
     if not c["HoTen"]:
-        return c, "Họ và tên không được để trống."
+        return c, "HoTen", "Họ và tên không được để trống."
     nd = normalize_date(c["NgaySinh"])
     if nd is None:
-        return c, "Ngày sinh không hợp lệ (định dạng dd/mm/yyyy, không ở tương lai)."
+        return c, "NgaySinh", "Ngày sinh không hợp lệ (định dạng dd/mm/yyyy, không ở tương lai)."
     c["NgaySinh"] = nd
     g = fold(c["GioiTinh"])
     if g in ("nam", "male", "m"):
@@ -391,15 +417,30 @@ def clean_student(d):
     elif g in ("nu", "female", "f"):
         c["GioiTinh"] = "Nữ"
     elif g:
-        return c, "Giới tính chỉ nhận 'Nam' hoặc 'Nữ'."
+        return c, "GioiTinh", "Giới tính chỉ nhận 'Nam' hoặc 'Nữ'."
+    cccd = re.sub(r"[ .\-]", "", c["CCCD"])
+    if cccd:
+        if re.fullmatch(r"\d{11}", cccd):                # Excel làm mất số 0 đầu
+            cccd = "0" + cccd
+        if not re.fullmatch(r"\d{12}", cccd):
+            return c, "CCCD", "CCCD phải gồm đúng 12 chữ số."
+    c["CCCD"] = cccd
     phone = re.sub(r"[ .\-()]", "", c["SDT"])
     if phone:
         if re.fullmatch(r"[1-9]\d{8,9}", phone):         # Excel làm mất số 0 đầu
             phone = "0" + phone
         if not re.fullmatch(r"0\d{9,10}", phone):
-            return c, "Số điện thoại phải gồm 10-11 chữ số và bắt đầu bằng 0."
+            return c, "SDT", "Số điện thoại phải gồm 10-11 chữ số và bắt đầu bằng 0."
     c["SDT"] = phone
-    return c, None
+    if c["Email"] and not EMAIL_RE.fullmatch(c["Email"]):
+        return c, "Email", "Email không hợp lệ (ví dụ: ten@example.com)."
+    return c, None, None
+
+
+def clean_student(d):
+    """Như check_student nhưng trả về (dữ liệu sạch, thông báo lỗi hoặc None) - dùng cho nhập Excel."""
+    c, _key, err = check_student(d)
+    return c, err
 
 
 # ====================================================================== bảng + màn hình
@@ -506,40 +547,55 @@ class SinhVienScreen(tk.Frame):
         return next((r for r in self.rows if r["MaSV"] == ma), None)
 
     # ---- thêm / sửa / xóa
-    def _ask(self, title, values=None):
-        """Mở form, kiểm tra; nếu sai thì báo lỗi và mở lại với nội dung đã nhập. Trả về dict sạch hoặc None."""
-        values = values or {}
-        while True:
-            d = form_dialog(self, title, FIELDS, values)
-            if not d:
-                return None
-            clean, err = clean_student(d)
-            if not err:
-                return clean
-            error(err)
-            values = clean
+    @staticmethod
+    def _validator(editing_ma=None):
+        """Hàm kiểm tra cho hộp thoại. editing_ma=None: đang THÊM (phải nhập + kiểm tra Mã SV mới);
+        có giá trị: đang SỬA sinh viên mang mã đó (Mã SV bị khóa, CCCD chỉ so với các sinh viên khác)."""
+        def check(v):
+            ma = None
+            if editing_ma is None:
+                raw = v.get("MaSV", "").strip()
+                if not raw:
+                    return None, ("MaSV", "Mã sinh viên không được để trống.")
+                if not (raw.isascii() and raw.isdigit() and 0 < int(raw) <= 9_999_999_999):
+                    return None, ("MaSV", "Mã sinh viên chỉ gồm chữ số (ví dụ: 2100006).")
+                ma = int(raw)
+                if db.query("SELECT 1 FROM SinhVien WHERE MaSV=?", (ma,), one=True):
+                    return None, ("MaSV", f"Mã sinh viên {ma} đã tồn tại.")
+            clean, key, err = check_student(v)
+            if err:
+                return None, (key, err)
+            if clean["CCCD"] and db.query("SELECT 1 FROM SinhVien WHERE CCCD=? AND MaSV<>?",
+                                          (clean["CCCD"], editing_ma or 0), one=True):
+                return None, ("CCCD", "CCCD này đã được dùng cho sinh viên khác.")
+            if ma is not None:
+                clean["MaSV"] = ma
+            return clean, None
+        return check
 
     def on_add(self):
-        d = self._ask("Thêm sinh viên")
+        d = form_modal(self, "Thêm sinh viên", student_fields(False), validate=self._validator())
         if not d:
             return
-        new_id = db.execute("INSERT INTO SinhVien(HoTen,NgaySinh,GioiTinh,Lop,SDT,QueQuan) VALUES(?,?,?,?,?,?)",
-                            (d["HoTen"], d["NgaySinh"], d["GioiTinh"], d["Lop"], d["SDT"], d["QueQuan"]))
+        try:
+            db.execute(SQL_INSERT, (d["MaSV"],) + tuple(d[c] for c in SV_COLS))
+        except sqlite3.IntegrityError:
+            return error("Không lưu được: mã sinh viên đã tồn tại.")
         db.ghi_nhat_ky("sv", f"Thêm sinh viên **{d['HoTen']}**")
         self.filter = FILTERS[0]
         self.kw.set("")
         self.refresh()
-        self.table.select(new_id, scroll=True)
+        self.table.select(d["MaSV"], scroll=True)
 
     def on_edit(self):
         r = self._student(self.sel)
         if not r:
             return
-        d = self._ask("Cập nhật sinh viên", r)
+        d = form_modal(self, "Cập nhật sinh viên", student_fields(True), r, validate=self._validator(r["MaSV"]))
         if not d:
             return
-        db.execute("UPDATE SinhVien SET HoTen=?,NgaySinh=?,GioiTinh=?,Lop=?,SDT=?,QueQuan=? WHERE MaSV=?",
-                   (d["HoTen"], d["NgaySinh"], d["GioiTinh"], d["Lop"], d["SDT"], d["QueQuan"], r["MaSV"]))
+        db.execute(SQL_UPDATE, tuple(d[c] for c in SV_COLS) + (r["MaSV"],))
+        db.ghi_nhat_ky("sv", f"Cập nhật sinh viên **{d['HoTen']}**")
         self.refresh()
 
     def on_delete(self):
@@ -575,7 +631,7 @@ class SinhVienScreen(tk.Frame):
                     w.writerow(EXPORT_HEADERS)
                     w.writerows(data)
             else:
-                xlsx_io.write_xlsx(path, EXPORT_HEADERS, data, widths=[10, 26, 14, 11, 14, 14, 18, 16],
+                xlsx_io.write_xlsx(path, EXPORT_HEADERS, data, widths=[10, 26, 14, 11, 14, 14, 18, 16, 28, 16],
                                    sheet_name="Sinh viên")
         except OSError as e:
             return error(f"Không ghi được file: {e}")
@@ -629,18 +685,18 @@ class SinhVienScreen(tk.Frame):
                         continue
                     ma = raw.get("MaSV", "").strip()
                     ma = int(ma) if ma.isdigit() and int(ma) > 0 else None
-                    vals = (d["HoTen"], d["NgaySinh"], d["GioiTinh"], d["Lop"], d["SDT"], d["QueQuan"])
+                    vals = tuple(d[c] for c in SV_COLS)
                     if ma and conn.execute("SELECT 1 FROM SinhVien WHERE MaSV=?", (ma,)).fetchone():
-                        conn.execute("UPDATE SinhVien SET HoTen=?,NgaySinh=?,GioiTinh=?,Lop=?,SDT=?,QueQuan=? "
-                                     "WHERE MaSV=?", vals + (ma,))
+                        # chỉ cập nhật các cột CÓ trong file, tránh xóa trắng CCCD/Email của file mẫu cũ
+                        cols = [c for c in SV_COLS if c in colmap]
+                        conn.execute(f"UPDATE SinhVien SET {','.join(c + '=?' for c in cols)} WHERE MaSV=?",
+                                     tuple(d[c] for c in cols) + (ma,))
                         updated += 1
                     elif ma:
-                        conn.execute("INSERT INTO SinhVien(HoTen,NgaySinh,GioiTinh,Lop,SDT,QueQuan,MaSV) "
-                                     "VALUES(?,?,?,?,?,?,?)", vals + (ma,))
+                        conn.execute(SQL_INSERT, (ma,) + vals)
                         added += 1
                     else:
-                        conn.execute("INSERT INTO SinhVien(HoTen,NgaySinh,GioiTinh,Lop,SDT,QueQuan) "
-                                     "VALUES(?,?,?,?,?,?)", vals)
+                        conn.execute(SQL_INSERT_AUTO, vals)
                         added += 1
         except sqlite3.Error as e:
             return error(f"Lỗi cơ sở dữ liệu, không có dòng nào được lưu:\n{e}")
@@ -653,4 +709,3 @@ class SinhVienScreen(tk.Frame):
         if errors:
             msg += f"\n\nBỏ qua {len(errors)} dòng lỗi:\n" + "\n".join(errors[:8]) + ("\n..." if len(errors) > 8 else "")
         (messagebox.showwarning if errors else messagebox.showinfo)("Kết quả nhập", msg)
-# hahahah
