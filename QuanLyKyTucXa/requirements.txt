@@ -1,1 +1,0 @@
-# Chi dung thu vien chuan cua Python 3.9+ (tkinter, sqlite3) - khong can cai them
