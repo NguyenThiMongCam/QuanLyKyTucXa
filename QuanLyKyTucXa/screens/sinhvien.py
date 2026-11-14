@@ -653,3 +653,4 @@ class SinhVienScreen(tk.Frame):
         if errors:
             msg += f"\n\nBỏ qua {len(errors)} dòng lỗi:\n" + "\n".join(errors[:8]) + ("\n..." if len(errors) > 8 else "")
         (messagebox.showwarning if errors else messagebox.showinfo)("Kết quả nhập", msg)
+# hahahah
