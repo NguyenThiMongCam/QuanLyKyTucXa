@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS Phong(
     Tang INTEGER NOT NULL, TrangThai TEXT NOT NULL DEFAULT 'Hoạt động');
 CREATE TABLE IF NOT EXISTS SinhVien(
     MaSV INTEGER PRIMARY KEY AUTOINCREMENT, HoTen TEXT NOT NULL, NgaySinh TEXT,
-    GioiTinh TEXT, Lop TEXT, SDT TEXT, QueQuan TEXT, MatKhau TEXT);
+    GioiTinh TEXT, Lop TEXT, SDT TEXT, QueQuan TEXT, MatKhau TEXT, CCCD TEXT, Email TEXT);
 CREATE TABLE IF NOT EXISTS HopDong(
     MaHD INTEGER PRIMARY KEY AUTOINCREMENT,
     MaSV INTEGER NOT NULL REFERENCES SinhVien(MaSV),
@@ -200,10 +200,11 @@ def init_db():
 
 
 def _migrate():
-    """Nâng cấp file kytucxa.db cũ: thêm cột MatKhau cho bảng SinhVien."""
+    """Nâng cấp file kytucxa.db cũ: thêm các cột còn thiếu (MatKhau, CCCD, Email) cho bảng SinhVien."""
     cols = [r["name"] for r in query("PRAGMA table_info(SinhVien)")]
-    if "MatKhau" not in cols:
-        execute("ALTER TABLE SinhVien ADD COLUMN MatKhau TEXT")
+    for col in ("MatKhau", "CCCD", "Email"):
+        if col not in cols:
+            execute(f"ALTER TABLE SinhVien ADD COLUMN {col} TEXT")
 
 
 def _seed_content():
