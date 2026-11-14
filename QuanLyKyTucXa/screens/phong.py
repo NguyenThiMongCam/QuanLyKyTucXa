@@ -14,6 +14,7 @@ from tkinter import font as tkfont
 import database as db
 from screens.base import CrudScreen, error, form_dialog, money, pick_id
 from screens.login import BORDER, FONT, MUTED, NAVY, PAGE_BG, PRIMARY, SEL_BG, TEXT, rounded_rect
+from screens.modal import form_modal
 from screens.sinhvien import (GREEN_FG, LINE, Card, Chip, DataTable, IconButton, SearchBox, fold)
 
 STATUS_STYLE = {"Còn chỗ": ("#0E7A3B", "#E4F6EA"), "Trống": ("#1D4F9F", "#DCE9FB"),
@@ -422,31 +423,46 @@ class PhongScreen(tk.Frame):
                 for r in db.query("SELECT * FROM LoaiPhong ORDER BY MaLoai")]
 
     def _fields(self):
-        return [("TenPhong", "Tên phòng", "entry", None),
-                ("Loai", "Loại phòng", "combo", self._loai_opts()),
-                ("Tang", "Tầng", "entry", None),
-                ("TrangThai", "Trạng thái", "combo", ["Hoạt động", "Bảo trì"])]
+        """Các ô của hộp thoại Thêm / Cập nhật phòng (mỗi ô một dòng, theo mẫu thiết kế)."""
+        return [{"key": "TenPhong", "label": "Tên phòng", "ph": "Ví dụ: A301", "required": True, "span": 2},
+                {"key": "Loai", "label": "Loại phòng", "kind": "combo", "opts": self._loai_opts(), "span": 2},
+                {"key": "Tang", "label": "Tầng", "ph": "1", "required": True, "span": 2},
+                {"key": "TrangThai", "label": "Trạng thái", "kind": "combo", "opts": ["Hoạt động", "Bảo trì"],
+                 "span": 2}]
 
-    def _check(self, d, id_=None):
-        if not d["TenPhong"]:
-            return "Tên phòng không được để trống."
-        if not d["Tang"].isdigit():
-            return "Tầng phải là số nguyên."
-        if db.query("SELECT MaPhong FROM Phong WHERE TenPhong=? AND MaPhong<>?", (d["TenPhong"], id_ or 0), one=True):
-            return "Tên phòng đã tồn tại."
-        return None
+    @staticmethod
+    def _validator(room=None):
+        """Hàm kiểm tra cho hộp thoại. room=None: đang THÊM; có giá trị: đang SỬA phòng đó (dict từ load_rooms).
+        Lỗi thì hộp thoại giữ nguyên nội dung và đưa con trỏ về đúng ô."""
+        def check(v):
+            if not v["TenPhong"]:
+                return None, ("TenPhong", "Tên phòng không được để trống.")
+            if not (v["Tang"].isascii() and v["Tang"].isdigit() and int(v["Tang"]) <= 99):
+                return None, ("Tang", "Tầng phải là số nguyên từ 0 đến 99.")
+            if db.query("SELECT 1 FROM Phong WHERE TenPhong=? COLLATE NOCASE AND MaPhong<>?",
+                        (v["TenPhong"], room["MaPhong"] if room else 0), one=True):
+                return None, ("TenPhong", f"Tên phòng {v['TenPhong']} đã tồn tại.")
+            if room:                                    # đổi loại phòng không được làm thiếu giường cho người đang ở
+                beds = db.query("SELECT SoGiuong FROM LoaiPhong WHERE MaLoai=?", (pick_id(v["Loai"]),),
+                                one=True)["SoGiuong"]
+                if beds < room["DangO"]:
+                    return None, ("Loai", f"Phòng đang có {room['DangO']} sinh viên ở, "
+                                          f"không thể đổi sang loại chỉ có {beds} giường.")
+            return dict(v, Tang=int(v["Tang"])), None
+        return check
 
     def on_add(self):
         if not self._loai_opts():
             return error("Hãy thêm loại phòng trước (nút Loại phòng).")
-        d = form_dialog(self, "Thêm phòng", self._fields())
+        d = form_modal(self, "Thêm phòng", self._fields(), validate=self._validator(), width=540)
         if not d:
             return
-        err = self._check(d)
-        if err:
-            return error(err)
-        new_id = db.execute("INSERT INTO Phong(TenPhong,MaLoai,Tang,TrangThai) VALUES(?,?,?,?)",
-                            (d["TenPhong"], pick_id(d["Loai"]), int(d["Tang"]), d["TrangThai"]))
+        try:
+            new_id = db.execute("INSERT INTO Phong(TenPhong,MaLoai,Tang,TrangThai) VALUES(?,?,?,?)",
+                                (d["TenPhong"], pick_id(d["Loai"]), d["Tang"], d["TrangThai"]))
+        except sqlite3.IntegrityError:
+            return error("Không lưu được: tên phòng đã tồn tại.")
+        db.ghi_nhat_ky("phong", f"Thêm phòng **{d['TenPhong']}**")
         self.filter, self.floor = FILTERS[0], ALL_FLOORS
         self.floor_var.set(ALL_FLOORS)
         self.kw.set("")
@@ -460,20 +476,15 @@ class PhongScreen(tk.Frame):
         cur = dict(db.query("SELECT * FROM Phong WHERE MaPhong=?", (r["MaPhong"],), one=True))
         opts = self._loai_opts()
         cur["Loai"] = next((o for o in opts if pick_id(o) == cur["MaLoai"]), opts[0])
-        d = form_dialog(self, "Cập nhật phòng", self._fields(), cur)
+        d = form_modal(self, "Cập nhật phòng", self._fields(), cur, validate=self._validator(r), width=540)
         if not d:
             return
-        err = self._check(d, r["MaPhong"])
-        if err:
-            return error(err)
-        beds = db.query("SELECT SoGiuong FROM LoaiPhong WHERE MaLoai=?", (pick_id(d["Loai"]),), one=True)["SoGiuong"]
-        if beds < r["DangO"]:
-            return error(f"Phòng đang có {r['DangO']} sinh viên ở, không thể đổi sang loại chỉ có {beds} giường.")
         if d["TrangThai"] == "Bảo trì" and r["DangO"] and not messagebox.askyesno(
                 "Xác nhận", f"Phòng {r['TenPhong']} đang có {r['DangO']} sinh viên ở. Vẫn chuyển sang bảo trì?"):
             return
         db.execute("UPDATE Phong SET TenPhong=?,MaLoai=?,Tang=?,TrangThai=? WHERE MaPhong=?",
-                   (d["TenPhong"], pick_id(d["Loai"]), int(d["Tang"]), d["TrangThai"], r["MaPhong"]))
+                   (d["TenPhong"], pick_id(d["Loai"]), d["Tang"], d["TrangThai"], r["MaPhong"]))
+        db.ghi_nhat_ky("phong", f"Cập nhật phòng **{d['TenPhong']}**")
         self.refresh()
 
     def on_delete(self):
