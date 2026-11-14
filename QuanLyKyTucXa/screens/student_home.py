@@ -7,9 +7,9 @@ from tkinter import messagebox, ttk
 
 import database as db
 from screens.base import Table, error, form_dialog, money, parse_date, valid_date
+from screens.sidebar import Sidebar
 from screens.login import BORDER, FONT, MUTED, NAVY, PAGE_BG, PRIMARY, SEL_BG, TEXT, FlatButton, rounded_rect
 
-SIDE, SIDE_HOVER, SIDE_TEXT = "#0B2F6B", "#1A4A9C", "#D6E4FB"
 
 
 # ---------------------------------------------------------------------- truy vấn dữ liệu
@@ -413,41 +413,19 @@ class ProfilePage(Page):
 
 # ---------------------------------------------------------------------- khung chính của sinh viên
 class StudentShell(tk.Frame):
-    PAGES = [("home", "🏠  Trang chủ", HomePage), ("room", "🛏  Phòng của tôi", RoomPage),
-             ("contract", "📄  Hợp đồng", ContractPage), ("bill", "💳  Hóa đơn", BillPage),
-             ("service", "🔧  Dịch vụ & sửa chữa", ServicePage), ("notice", "🔔  Thông báo", NoticePage),
-             ("rules", "📘  Nội quy", RulesPage), ("profile", "👤  Hồ sơ cá nhân", ProfilePage)]
+    PAGES = [("home", "Trang chủ", HomePage), ("room", "Phòng của tôi", RoomPage),
+             ("contract", "Hợp đồng", ContractPage), ("bill", "Hóa đơn", BillPage),
+             ("service", "Dịch vụ & sửa chữa", ServicePage), ("notice", "Thông báo", NoticePage),
+             ("rules", "Nội quy", RulesPage), ("profile", "Hồ sơ cá nhân", ProfilePage)]
+    ICONS = {"home": "home", "room": "room", "contract": "contract", "bill": "bill", "service": "service",
+             "notice": "notice", "rules": "rules", "profile": "staff"}
 
     def __init__(self, master, user, on_logout):
         super().__init__(master, bg=PAGE_BG)
         self.user, self.on_logout = user, on_logout
-        self.current, self.nav = None, {}
-
-        side = tk.Frame(self, bg=SIDE, width=260)
-        side.pack(side="left", fill="y")
-        side.pack_propagate(False)
-        logo = tk.Canvas(side, width=44, height=44, bg=SIDE, highlightthickness=0)
-        rounded_rect(logo, 1, 1, 43, 43, 11, fill=PRIMARY, outline=PRIMARY)
-        logo.create_text(22, 22, text="🎓", font=(FONT, 15), fill="white")
-        logo.pack(pady=(26, 6))
-        tk.Label(side, text="KÝ TÚC XÁ", bg=SIDE, fg="white", font=(FONT, 16, "bold")).pack()
-        tk.Label(side, text="Sinh viên", bg=SIDE, fg="#BBD0F2", font=(FONT, 9)).pack()
-        self.who = tk.Label(side, text="", bg=SIDE, fg="#BBD0F2", font=(FONT, 9), wraplength=220)
-        self.who.pack(pady=(2, 18))
-        for key, text, _cls in self.PAGES:
-            lb = tk.Label(side, text=text, anchor="w", padx=16, pady=9, bg=SIDE, fg=SIDE_TEXT,
-                          font=(FONT, 11, "bold"), cursor="hand2")
-            lb.pack(fill="x", padx=12, pady=2)
-            lb.bind("<Button-1>", lambda _e, k=key: self.show(k))
-            lb.bind("<Enter>", lambda _e, k=key: self._hover(k, True))
-            lb.bind("<Leave>", lambda _e, k=key: self._hover(k, False))
-            self.nav[key] = lb
-        out = tk.Label(side, text="⏻  Đăng xuất", anchor="w", padx=16, pady=9, bg=SIDE, fg="#FFC9C9",
-                       font=(FONT, 11, "bold"), cursor="hand2")
-        out.pack(side="bottom", fill="x", padx=12, pady=16)
-        out.bind("<Button-1>", lambda _e: self.on_logout())
-        out.bind("<Enter>", lambda _e: out.config(bg="#7A1F2B"))
-        out.bind("<Leave>", lambda _e: out.config(bg=SIDE))
+        self.current = None
+        self.side = Sidebar(self, "", [(k, t, self.ICONS[k]) for k, t, _c in self.PAGES], self.show, self.on_logout)
+        self.side.pack(side="left", fill="y")
 
         self.content = tk.Frame(self, bg=PAGE_BG)
         self.content.pack(side="left", fill="both", expand=True)
@@ -455,16 +433,11 @@ class StudentShell(tk.Frame):
         self.show("home")
 
     def _refresh_who(self):
-        self.who.config(text=f"{self.user['HoTen']} · MSSV {self.user['MaSV']}")
-
-    def _hover(self, key, on):
-        if key != self.current:
-            self.nav[key].config(bg=SIDE_HOVER if on else SIDE)
+        self.side.set_subtitle(f"Sinh viên\n{self.user['HoTen']} · MSSV {self.user['MaSV']}")
 
     def show(self, key):
         self.current = key
-        for k, lb in self.nav.items():
-            lb.config(bg=PRIMARY if k == key else SIDE, fg="white" if k == key else SIDE_TEXT)
+        self.side.set_active(key)
         for w in self.content.winfo_children():
             w.destroy()
         cls = next(c for k, _t, c in self.PAGES if k == key)
