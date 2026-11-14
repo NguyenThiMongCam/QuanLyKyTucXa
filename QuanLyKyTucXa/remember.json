@@ -1,5 +1,1 @@
-<<<<<<< HEAD
-{}
-=======
-{"role": "student", "users": {"admin": "admin", "student": "1"}}
->>>>>>> 3202e94ede1876355223a79d07100d70ee799347
+{"role": "admin", "users": {"admin": "admin"}}
