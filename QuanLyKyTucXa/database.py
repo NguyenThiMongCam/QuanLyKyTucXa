@@ -44,6 +44,13 @@ CREATE TABLE IF NOT EXISTS YeuCau(
     Loai TEXT NOT NULL, NoiDung TEXT NOT NULL, NgayGui TEXT NOT NULL,
     TrangThai TEXT NOT NULL DEFAULT 'Chờ xử lý');
 CREATE TABLE IF NOT EXISTS CauHinh(Khoa TEXT PRIMARY KEY, GiaTri TEXT);
+CREATE TABLE IF NOT EXISTS ThanhToan(
+    MaTT INTEGER PRIMARY KEY AUTOINCREMENT,
+    MaHDon INTEGER NOT NULL REFERENCES HoaDon(MaHDon),
+    SoTien INTEGER NOT NULL, HinhThuc TEXT NOT NULL, GhiChu TEXT,
+    Ngay TEXT NOT NULL, NguoiThu TEXT);
+CREATE TABLE IF NOT EXISTS NhatKy(
+    MaNK INTEGER PRIMARY KEY AUTOINCREMENT, ThoiGian TEXT NOT NULL, Loai TEXT NOT NULL, NoiDung TEXT NOT NULL);
 """
 
 # Cấu hình hiển thị cho sinh viên (sửa trực tiếp trong bảng CauHinh nếu cần)
@@ -130,8 +137,18 @@ def get_config(key, default=""):
 
 def tao_yeu_cau(ma_sv, loai, noi_dung):
     """Sinh viên gửi yêu cầu (loai: 'Sửa chữa' | 'Về muộn' | 'Gia hạn') tới Ban quản lý."""
-    return execute("INSERT INTO YeuCau(MaSV,Loai,NoiDung,NgayGui) VALUES(?,?,?,?)",
-                   (ma_sv, loai, noi_dung, datetime.now().strftime("%d/%m/%Y")))
+    ma = execute("INSERT INTO YeuCau(MaSV,Loai,NoiDung,NgayGui) VALUES(?,?,?,?)",
+                 (ma_sv, loai, noi_dung, datetime.now().strftime("%d/%m/%Y")))
+    sv = query("SELECT HoTen FROM SinhVien WHERE MaSV=?", (ma_sv,), one=True)
+    ghi_nhat_ky("yeucau", f"Yêu cầu {loai.lower()} từ **{sv['HoTen'] if sv else ma_sv}**")
+    return ma
+
+
+def ghi_nhat_ky(loai, noi_dung):
+    """Ghi một dòng vào 'Hoạt động gần đây' của trang chủ quản trị.
+    loai: thu | phong | hoadon | sv | yeucau.  Dùng **...** để in đậm một đoạn."""
+    execute("INSERT INTO NhatKy(ThoiGian,Loai,NoiDung) VALUES(?,?,?)",
+            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), loai, noi_dung))
 
 
 def cap_nhat_sinh_vien(ma_sv, ho_ten, sdt, que_quan):
@@ -177,6 +194,7 @@ def init_db():
     conn.close()
     _migrate()
     _seed_content()
+    _backfill_log()
     if query("SELECT COUNT(*) FROM NhanVien", one=True)[0] == 0:
         _seed()
 
@@ -201,6 +219,27 @@ def _seed_content():
             execute("INSERT INTO ThongBao(TieuDe,NoiDung,Ngay) VALUES(?,?,?)", (tieu_de, noi_dung, ngay))
     for k, v in DEFAULT_CONFIG.items():
         execute("INSERT OR IGNORE INTO CauHinh(Khoa,GiaTri) VALUES(?,?)", (k, v))
+
+
+def _backfill_log():
+    """Lần đầu có bảng NhatKy: dựng sẵn vài dòng từ dữ liệu đã có (thanh toán, hợp đồng gần nhất)."""
+    if query("SELECT COUNT(*) FROM NhatKy", one=True)[0]:
+        return
+
+    def to_iso(d):                       # dd/mm/yyyy -> yyyy-mm-dd 00:00:00
+        try:
+            return datetime.strptime(d, "%d/%m/%Y").strftime("%Y-%m-%d 00:00:00")
+        except (TypeError, ValueError):
+            return datetime.now().strftime("%Y-%m-%d 00:00:00")
+
+    for r in query("""SELECT t.SoTien, t.Ngay, p.TenPhong FROM ThanhToan t JOIN HoaDon h ON h.MaHDon=t.MaHDon
+                      JOIN Phong p ON p.MaPhong=h.MaPhong ORDER BY t.MaTT DESC LIMIT 4"""):
+        execute("INSERT INTO NhatKy(ThoiGian,Loai,NoiDung) VALUES(?,?,?)",
+                (to_iso(r["Ngay"]), "thu", f"Thu **{r['SoTien']:,} đ** – phòng {r['TenPhong']}".replace(",", ".")))
+    for r in query("""SELECT s.HoTen, p.TenPhong, h.NgayBatDau FROM HopDong h JOIN SinhVien s ON s.MaSV=h.MaSV
+                      JOIN Phong p ON p.MaPhong=h.MaPhong ORDER BY h.MaHD DESC LIMIT 4"""):
+        execute("INSERT INTO NhatKy(ThoiGian,Loai,NoiDung) VALUES(?,?,?)",
+                (to_iso(r["NgayBatDau"]), "phong", f"Đăng ký phòng {r['TenPhong']} – **{r['HoTen']}**"))
 
 
 def _seed():
