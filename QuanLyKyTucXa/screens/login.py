@@ -1,8 +1,7 @@
 """Màn hình đăng nhập - giao diện xanh/trắng (Tkinter).
 
-LoginScreen(master, on_success): khi đăng nhập đúng sẽ gọi on_success(user, kind)
-    kind = "staff"   -> admin / nhân viên (bảng NhanVien)
-    kind = "student" -> sinh viên đăng nhập bằng mã sinh viên (bảng SinhVien)
+LoginScreen(master, on_success): khi đăng nhập đúng sẽ gọi on_success(user, "staff")
+Cổng này CHỈ dành cho quản lý (admin / nhân viên, bảng NhanVien).
 """
 import json
 import os
@@ -18,6 +17,8 @@ PAGE_BG, BORDER, INPUT_BORDER = "#F3F7FD", "#DCE6F7", "#CBD8EE"
 TEXT, MUTED, PLACEHOLDER = "#0F2447", "#4A5A78", "#6B7A96"
 SEL_BG, IDLE_BG, IDLE_BORDER = "#E3EEFF", "#F6F9FE", "#D5E1F5"
 ERROR = "#B3261E"
+ROLE = "admin"   # khóa dùng để nhớ tên đăng nhập trong remember.json
+SHADOW = ("#EFF4FC", "#E9F0FA", "#E2EBF8")   # 3 lớp bóng, từ ngoài vào trong
 
 # File nhớ đăng nhập (chỉ lưu vai trò + tên đăng nhập, KHÔNG lưu mật khẩu)
 REMEMBER_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "remember.json")
@@ -132,15 +133,37 @@ class Field(tk.Frame):
         self.entry.focus_set()
 
 
+class RoundedCard(tk.Canvas):
+    """Thẻ trắng bo góc + bóng mờ. Đặt widget con vào self.inner."""
+    INSET = 10   # lề giữa mép thẻ và khung nội dung (để góc vuông không lòi ra ngoài góc bo)
+
+    def __init__(self, master, outside=PAGE_BG, radius=24, pad=20):
+        super().__init__(master, bg=outside, highlightthickness=0, bd=0)
+        self.radius, self.pad = radius, pad
+        self.inner = tk.Frame(self, bg="white")
+        self.create_window(pad + self.INSET, pad + self.INSET, window=self.inner, anchor="nw")
+        self.inner.bind("<Configure>", self._redraw)
+
+    def _redraw(self, _e=None):
+        w = self.inner.winfo_reqwidth() + 2 * self.INSET
+        h = self.inner.winfo_reqheight() + 2 * self.INSET
+        p, r = self.pad, self.radius
+        self.config(width=w + 2 * p, height=h + 2 * p)
+        self.delete("bg")
+        for i, color in enumerate(SHADOW):          # bóng đổ lệch xuống 6px
+            g = (len(SHADOW) - i) * 3
+            rounded_rect(self, p - g, p - g + 6, p + w + g, p + h + g + 6, r + g,
+                         fill=color, outline="", tags="bg")
+        rounded_rect(self, p, p, p + w, p + h, r, fill="white", outline=BORDER, tags="bg")
+        self.tag_lower("bg")
+
+
 class LoginScreen(tk.Frame):
     def __init__(self, master, on_success):
         super().__init__(master, bg=PAGE_BG)
         self.on_success = on_success
         self._top = master.winfo_toplevel()
-        self.role = tk.StringVar(value="student")
-        self.dorm = tk.StringVar(value="in")
         self.remember = tk.BooleanVar(value=False)
-        self._cards = {}
         self._saved = load_remember()
 
         self._build_header()
@@ -153,9 +176,11 @@ class LoginScreen(tk.Frame):
         self._build_hero(body)
         self._build_form(body)
 
-        saved_role = self._saved.get("role", "student")
+        # Điền sẵn tên đăng nhập đã nhớ (nếu có)
         self.remember.set(bool(self._saved.get("users")))
-        self._set_role(saved_role if saved_role in ("student", "admin") else "student")
+        last = self._saved.get("users", {}).get(ROLE, "")
+        if last and self.remember.get():
+            self.uid.set(last)
 
         self._top.bind("<Return>", self._submit)
         self.bind("<Destroy>", self._on_destroy)
@@ -200,10 +225,10 @@ class LoginScreen(tk.Frame):
                            "gửi yêu cầu sửa chữa và nhận thông báo từ Ban quản lý.",
                  bg=HERO, fg=HERO_TEXT, font=(FONT, 11), wraplength=400, justify="left").pack(anchor="w")
         features = [
-            ("🏠", "Đăng ký & gia hạn phòng", "Trực tuyến, xem tình trạng chỗ ở"),
-            ("💳", "Tra cứu hóa đơn", "Tiền phòng, điện, nước theo từng tháng"),
-            ("🔧", "Gửi yêu cầu sửa chữa", "Theo dõi tiến độ xử lý"),
-            ("🔔", "Nhận thông báo", "Lịch cắt điện nước, nội quy và sự kiện"),
+            ("🏠", "Đăng ký & gia hạn phòng", "trực tuyến, xem tình trạng chỗ ở"),
+            ("💳", "Tra cứu hóa đơn", "tiền phòng, điện, nước theo từng tháng"),
+            ("🔧", "Gửi yêu cầu sửa chữa", "và theo dõi tiến độ xử lý"),
+            ("🔔", "Nhận thông báo", "lịch cắt điện nước, nội quy và sự kiện"),
         ]
         lst = tk.Frame(box, bg=HERO)
         lst.pack(anchor="w", pady=(22, 18))
@@ -213,51 +238,43 @@ class LoginScreen(tk.Frame):
             tk.Label(row, text=icon, bg=HERO_ACCENT, fg="white", font=(FONT, 13), width=3, pady=6).pack(side="left")
             col = tk.Frame(row, bg=HERO)
             col.pack(side="left", padx=14)
-            tk.Label(col, text=title, bg=HERO, fg="white", font=(FONT, 11, "bold")).pack(anchor="w")
-            tk.Label(col, text=desc, bg=HERO, fg=HERO_TEXT, font=(FONT, 10)).pack(anchor="w")
+            # Một dòng: tiêu đề in đậm + mô tả chữ thường (giống thiết kế)
+            tk.Label(col, text=title, bg=HERO, fg="white", font=(FONT, 10, "bold")).pack(side="left")
+            tk.Label(col, text=" " + desc, bg=HERO, fg=HERO_TEXT, font=(FONT, 10)).pack(side="left")
         tk.Label(box, text="Cần hỗ trợ? Liên hệ Ban quản lý KTX: [SỐ ĐIỆN THOẠI] · [EMAIL KTX]",
                  bg=HERO, fg=HERO_TEXT, font=(FONT, 9)).pack(anchor="w")
 
     def _build_form(self, body):
         right = tk.Frame(body, bg=PAGE_BG)
         right.grid(row=0, column=1, sticky="nsew")
-        card = tk.Frame(right, bg="white", highlightthickness=1, highlightbackground=BORDER)
+        card = RoundedCard(right)
         card.place(relx=0.5, rely=0.5, anchor="center")
-        pad = tk.Frame(card, bg="white")
-        pad.pack(padx=32, pady=24)
+        pad = tk.Frame(card.inner, bg="white")
+        pad.pack(padx=22, pady=18)
         pad.columnconfigure(0, minsize=380, weight=1)
 
         def put(r, widget, pady=(0, 0)):
             widget.grid(row=r, column=0, sticky="ew", pady=pady)
 
         put(0, tk.Label(pad, text="Đăng nhập hệ thống", bg="white", fg=NAVY, font=(FONT, 19, "bold"),
-                        anchor="w"), pady=(0, 14))
-        put(1, tk.Label(pad, text="Bạn là", bg="white", fg=TEXT, font=(FONT, 10, "bold"), anchor="w"),
-            pady=(0, 6))
+                        anchor="w"), pady=(0, 2))
+        put(1, tk.Label(pad, text="Nhập thông tin tài khoản dành cho quản lý.", bg="white", fg=MUTED,
+                        font=(FONT, 10), anchor="w"), pady=(0, 16))
 
-        roles = tk.Frame(pad, bg="white")
-        roles.columnconfigure((0, 1), weight=1, uniform="role")
-        self._role_card(roles, "student", "🎓", "SINH VIÊN", 0)
-        self._role_card(roles, "admin", "🛡", "QUẢN LÝ", 1)
-        put(2, roles, pady=(0, 14))
+        # Thẻ "QUẢN LÝ" (thay cho 2 nút chọn vai trò cũ)
+        badge = tk.Frame(pad, bg=SEL_BG, highlightthickness=2, highlightbackground=PRIMARY)
+        tk.Label(badge, text="🛡", bg=SEL_BG, fg=NAVY, font=(FONT, 13)).pack(side="left", padx=(14, 8), pady=10)
+        tk.Label(badge, text="QUẢN LÝ", bg=SEL_BG, fg=NAVY, font=(FONT, 10, "bold")).pack(side="left")
+        put(2, badge, pady=(0, 16))
 
-        self.dorm_box = tk.Frame(pad, bg="white")
-        tk.Label(self.dorm_box, text="Tình trạng ký túc xá", bg="white", fg=TEXT, font=(FONT, 10, "bold"),
-                 anchor="w").pack(fill="x", pady=(0, 4))
-        for text, val in (("Sinh viên đang ở ký túc xá", "in"), ("Sinh viên chưa ở ký túc xá (đăng ký mới)", "out")):
-            tk.Radiobutton(self.dorm_box, text=text, variable=self.dorm, value=val, bg="white",
-                           activebackground="white", fg=TEXT, font=(FONT, 10), anchor="w",
-                           highlightthickness=0, cursor="hand2").pack(fill="x")
-        put(3, self.dorm_box, pady=(0, 12))
-
-        self.id_label = tk.Label(pad, text="Mã sinh viên", bg="white", fg=TEXT, font=(FONT, 10, "bold"), anchor="w")
-        put(4, self.id_label, pady=(0, 4))
-        self.uid = Field(pad, "Nhập mã sinh viên")
-        put(5, self.uid, pady=(0, 12))
-        put(6, tk.Label(pad, text="Mật khẩu", bg="white", fg=TEXT, font=(FONT, 10, "bold"), anchor="w"),
+        put(3, tk.Label(pad, text="Tên đăng nhập", bg="white", fg=TEXT, font=(FONT, 10, "bold"), anchor="w"),
+            pady=(0, 4))
+        self.uid = Field(pad, "Nhập tên đăng nhập quản lý")
+        put(4, self.uid, pady=(0, 12))
+        put(5, tk.Label(pad, text="Mật khẩu", bg="white", fg=TEXT, font=(FONT, 10, "bold"), anchor="w"),
             pady=(0, 4))
         self.pw = Field(pad, "Nhập mật khẩu", secret=True)
-        put(7, self.pw, pady=(0, 10))
+        put(6, self.pw, pady=(0, 10))
 
         opts = tk.Frame(pad, bg="white")
         tk.Checkbutton(opts, text="Ghi nhớ đăng nhập trên máy này", variable=self.remember, bg="white",
@@ -267,53 +284,19 @@ class LoginScreen(tk.Frame):
                           cursor="hand2")
         forgot.pack(side="right")
         forgot.bind("<Button-1>", lambda _e: messagebox.showinfo(
-            "Quên mật khẩu", "Vui lòng liên hệ Ban quản lý ký túc xá để được cấp lại mật khẩu."))
-        put(8, opts, pady=(0, 6))
+            "Quên mật khẩu", "Vui lòng liên hệ quản trị hệ thống để được cấp lại mật khẩu."))
+        put(7, opts, pady=(0, 6))
 
         self.msg = tk.Label(pad, text="", bg="white", fg=ERROR, font=(FONT, 10), anchor="w",
                             justify="left", wraplength=380)
-        put(9, self.msg, pady=(0, 6))
-        put(10, FlatButton(pad, "Đăng nhập", self._submit, pady=11, font=(FONT, 12, "bold")))
-        put(11, tk.Label(pad, text="Mật khẩu ban đầu do Ban quản lý KTX cấp. Nếu quên hoặc bị khóa tài khoản, "
-                                   "liên hệ phòng quản lý để được hỗ trợ.",
+        put(8, self.msg, pady=(0, 6))
+        put(9, FlatButton(pad, "Đăng nhập", self._submit, pady=11, font=(FONT, 12, "bold")))
+        put(10, tk.Label(pad, text="Tài khoản quản lý do quản trị hệ thống cấp. Nếu quên hoặc bị khóa "
+                                   "tài khoản, vui lòng liên hệ quản trị viên để được hỗ trợ.",
                          bg="white", fg=MUTED, font=(FONT, 9), wraplength=380, justify="center"),
             pady=(12, 0))
 
-    def _role_card(self, parent, key, icon, text, col):
-        card = tk.Frame(parent, bg=IDLE_BG, highlightthickness=2, highlightbackground=IDLE_BORDER, cursor="hand2")
-        card.grid(row=0, column=col, sticky="ew", padx=(0, 10) if col == 0 else (0, 0))
-        ic = tk.Label(card, text=icon, bg=IDLE_BG, font=(FONT, 15), cursor="hand2")
-        ic.pack(pady=(8, 0))
-        tx = tk.Label(card, text=text, bg=IDLE_BG, fg=MUTED, font=(FONT, 9, "bold"), cursor="hand2")
-        tx.pack(pady=(0, 8))
-        for w in (card, ic, tx):
-            w.bind("<Button-1>", lambda _e, k=key: self._set_role(k))
-        self._cards[key] = (card, ic, tx)
-
     # ------------------------------------------------------------------ xử lý
-    def _set_role(self, key):
-        self.role.set(key)
-        for k, (card, ic, tx) in self._cards.items():
-            sel = k == key
-            bg = SEL_BG if sel else IDLE_BG
-            card.config(bg=bg, highlightbackground=PRIMARY if sel else IDLE_BORDER)
-            ic.config(bg=bg)
-            tx.config(bg=bg, fg=NAVY if sel else MUTED)
-        if key == "student":
-            self.id_label.config(text="Mã sinh viên")
-            self.uid.set_placeholder("Nhập mã sinh viên")
-            self.dorm_box.grid()
-        else:
-            self.id_label.config(text="Tên đăng nhập")
-            self.uid.set_placeholder("Nhập tên đăng nhập quản lý")
-            self.dorm_box.grid_remove()
-        self.pw.clear()
-        self.uid.clear()
-        self.msg.config(text="")
-        last = self._saved.get("users", {}).get(key, "")
-        if last and self.remember.get():
-            self.uid.set(last)
-
     def _focus_first(self):
         try:
             (self.pw if self.uid.get() else self.uid).focus_entry()
@@ -324,40 +307,23 @@ class LoginScreen(tk.Frame):
         self.msg.config(text=text)
 
     def _submit(self, _e=None):
-        role = self.role.get()
         username, password = self.uid.get().strip(), self.pw.get()
         if not username or not password:
-            self._error("Vui lòng nhập %s và mật khẩu." % ("mã sinh viên" if role == "student" else "tên đăng nhập"))
+            self._error("Vui lòng nhập tên đăng nhập và mật khẩu.")
             return
-        if role == "student":
-            user = db.login_sinh_vien(username, password)
-            if not user:
-                self._error("Sai mã sinh viên hoặc mật khẩu.")
-                return
-            want_in = self.dorm.get() == "in"
-            if want_in and not user["DangO"]:
-                self._error("Bạn chưa có hợp đồng ký túc xá đang thuê. "
-                            "Hãy chọn \"Sinh viên chưa ở ký túc xá\".")
-                return
-            if not want_in and user["DangO"]:
-                self._error("Bạn đang ở ký túc xá. Hãy chọn \"Sinh viên đang ở ký túc xá\".")
-                return
-            kind = "student"
-        else:
-            user = db.login(username, password)
-            if not user:
-                self._error("Sai tên đăng nhập hoặc mật khẩu.")
-                return
-            kind = "staff"
-        self._remember(role, username)
+        user = db.login(username, password)
+        if not user:
+            self._error("Sai tên đăng nhập hoặc mật khẩu.")
+            return
+        self._remember(username)
         self._top.unbind("<Return>")
-        self.on_success(user, kind)
+        self.on_success(user, "staff")
 
-    def _remember(self, role, username):
+    def _remember(self, username):
         users = self._saved.get("users", {})
         if self.remember.get():
-            users[role] = username
-            save_remember({"role": role, "users": users})
+            users[ROLE] = username          # chỉ nhớ tên đăng nhập, KHÔNG lưu mật khẩu
+            save_remember({"role": ROLE, "users": users})
         else:
             save_remember({})
 
