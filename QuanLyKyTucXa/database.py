@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS HoaDon(
     Thang TEXT NOT NULL, TienPhong INTEGER, SoDien REAL, SoNuoc REAL,
     TienDien INTEGER, TienNuoc INTEGER, TongTien INTEGER,
     DaThu INTEGER NOT NULL DEFAULT 0, TrangThai TEXT NOT NULL DEFAULT 'Chưa thu',
-    NgayThu TEXT, UNIQUE(MaPhong, Thang));
+    NgayThu TEXT, NgayLap TEXT, TienKhac INTEGER DEFAULT 0, ChiSoDien REAL, ChiSoNuoc REAL,
+    UNIQUE(MaPhong, Thang));
 CREATE TABLE IF NOT EXISTS NhanVien(
     MaNV INTEGER PRIMARY KEY AUTOINCREMENT, TenDangNhap TEXT NOT NULL UNIQUE,
     MatKhau TEXT NOT NULL, HoTen TEXT NOT NULL, VaiTro TEXT NOT NULL DEFAULT 'nhanvien');
@@ -205,6 +206,11 @@ def _migrate():
     for col in ("MatKhau", "CCCD", "Email"):
         if col not in cols:
             execute(f"ALTER TABLE SinhVien ADD COLUMN {col} TEXT")
+    have = [r["name"] for r in query("PRAGMA table_info(HoaDon)")]      # hóa đơn: ngày lập, dịch vụ khác, chỉ số đồng hồ
+    for col, typ in (("NgayLap", "TEXT"), ("TienKhac", "INTEGER DEFAULT 0"), ("ChiSoDien", "REAL"),
+                     ("ChiSoNuoc", "REAL")):
+        if col not in have:
+            execute(f"ALTER TABLE HoaDon ADD COLUMN {col} {typ}")
 
 
 def _seed_content():
