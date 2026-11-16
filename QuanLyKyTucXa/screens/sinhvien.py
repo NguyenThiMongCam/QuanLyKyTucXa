@@ -20,7 +20,7 @@ from tkinter import font as tkfont
 
 import database as db
 from screens import xlsx_io
-from screens.base import error, parse_date
+from screens.base import error, parse_date, pick_id
 from screens.modal import form_modal
 from screens.login import (BORDER, FONT, INPUT_BORDER, MUTED, NAVY, PAGE_BG, PLACEHOLDER, PRIMARY, SEL_BG, TEXT,
                            rounded_rect)
@@ -93,6 +93,32 @@ def draw_icon(cv, name, cx, cy, color):
     elif name == "list":
         for dy in (-5, 0, 5):
             cv.create_line(cx - 7, cy + dy, cx + 7, cy + dy, **kw)
+    elif name == "search":
+        cv.create_oval(cx - 7, cy - 7, cx + 3, cy + 3, outline=color, width=2)
+        cv.create_line(cx + 2, cy + 2, cx + 8, cy + 8, **kw)
+    elif name == "refresh":
+        cv.create_arc(cx - 7, cy - 7, cx + 7, cy + 7, start=40, extent=270, style="arc", outline=color, width=2)
+        cv.create_line(cx + 5, cy - 7, cx + 6, cy - 2, cx + 1, cy - 3, **kw)
+    elif name in ("sheet", "pdf"):                     # tờ giấy + (lưới | chữ)
+        cv.create_rectangle(cx - 6, cy - 8, cx + 6, cy + 8, outline=color, width=2)
+        if name == "sheet":
+            cv.create_line(cx - 6, cy, cx + 6, cy, fill=color, width=2)
+            cv.create_line(cx, cy - 8, cx, cy + 8, fill=color, width=2)
+        else:
+            cv.create_line(cx - 3, cy - 2, cx + 3, cy - 2, fill=color, width=2)
+            cv.create_line(cx - 3, cy + 3, cx + 3, cy + 3, fill=color, width=2)
+    elif name == "print":
+        cv.create_rectangle(cx - 8, cy - 2, cx + 8, cy + 6, outline=color, width=2)
+        cv.create_rectangle(cx - 4, cy - 8, cx + 4, cy - 2, outline=color, width=2)
+        cv.create_rectangle(cx - 4, cy + 3, cx + 4, cy + 8, outline=color, width=2)
+    elif name == "chart":
+        cv.create_line(cx - 7, cy + 8, cx - 7, cy + 1, **kw)
+        cv.create_line(cx, cy + 8, cx, cy - 5, **kw)
+        cv.create_line(cx + 7, cy + 8, cx + 7, cy - 1, **kw)
+    elif name == "bell":
+        cv.create_arc(cx - 7, cy - 8, cx + 7, cy + 6, start=0, extent=180, style="arc", outline=color, width=2)
+        cv.create_line(cx - 7, cy - 1, cx - 7, cy + 5, cx + 7, cy + 5, cx + 7, cy - 1, **kw)
+        cv.create_line(cx - 2, cy + 8, cx + 2, cy + 8, **kw)
     elif name in ("down", "up"):                       # mũi tên + khay
         d = 1 if name == "down" else -1
         cv.create_line(cx, cy - 7 * d, cx, cy + 3 * d, **kw)
@@ -334,19 +360,83 @@ SQL_INSERT_AUTO = f"INSERT INTO SinhVien({','.join(SV_COLS)}) VALUES(?{',?' * (l
 SQL_UPDATE = f"UPDATE SinhVien SET {','.join(c + '=?' for c in SV_COLS)} WHERE MaSV=?"
 
 
-def student_fields(editing=False):
+PROVINCES = [
+    "An Giang", "Bà Rịa - Vũng Tàu", "Bạc Liêu", "Bắc Giang", "Bắc Kạn", "Bắc Ninh", "Bến Tre", "Bình Dương",
+    "Bình Định", "Bình Phước", "Bình Thuận", "Cà Mau", "Cần Thơ", "Cao Bằng", "Đà Nẵng", "Đắk Lắk", "Đắk Nông",
+    "Điện Biên", "Đồng Nai", "Đồng Tháp", "Gia Lai", "Hà Giang", "Hà Nam", "Hà Nội", "Hà Tĩnh", "Hải Dương",
+    "Hải Phòng", "Hậu Giang", "Hòa Bình", "Hưng Yên", "Khánh Hòa", "Kiên Giang", "Kon Tum", "Lai Châu",
+    "Lâm Đồng", "Lạng Sơn", "Lào Cai", "Long An", "Nam Định", "Nghệ An", "Ninh Bình", "Ninh Thuận", "Phú Thọ",
+    "Phú Yên", "Quảng Bình", "Quảng Nam", "Quảng Ngãi", "Quảng Ninh", "Quảng Trị", "Sóc Trăng", "Sơn La",
+    "Tây Ninh", "Thái Bình", "Thái Nguyên", "Thanh Hóa", "Thừa Thiên Huế", "Tiền Giang", "TP. Hồ Chí Minh",
+    "Trà Vinh", "Tuyên Quang", "Vĩnh Long", "Vĩnh Phúc", "Yên Bái"]
+NO_ROOM = "Chưa xếp phòng"
+
+
+def room_options(current=None):
+    """Danh sách chọn phòng: 'Chưa xếp phòng' + các phòng còn chỗ (+ phòng sinh viên đang ở nếu đang sửa)."""
+    opts = [NO_ROOM]
+    for p in db.danh_sach_phong():
+        if p["TinhTrang"] in ("Trống", "Còn chỗ") or p["MaPhong"] == current:
+            opts.append(f"{p['MaPhong']} - {p['TenPhong']} (còn {max(p['SoGiuong'] - p['DangO'], 0)} chỗ)")
+    return opts
+
+
+def current_room(ma_sv):
+    """Mã phòng sinh viên đang ở (hợp đồng 'Đang thuê'), None nếu chưa xếp phòng."""
+    r = db.query("SELECT MaPhong FROM HopDong WHERE MaSV=? AND TrangThai='Đang thuê' LIMIT 1", (ma_sv,), one=True)
+    return r["MaPhong"] if r else None
+
+
+def assign_room(ma_sv, new_room):
+    """Xếp sinh viên vào phòng new_room (None = trả phòng) bằng cách tạo / kết thúc hợp đồng - giống trang Hợp đồng.
+    Hợp đồng mới bắt đầu hôm nay; hết hạn theo hợp đồng cũ (nếu còn hiệu lực) hoặc sau 12 tháng."""
+    today = date.today()
+    fmt = "%d/%m/%Y"
+    conn = db.get_conn()
+    try:
+        with conn:
+            cur = conn.execute("SELECT MaHD,MaPhong,NgayKetThuc FROM HopDong WHERE MaSV=? AND TrangThai='Đang thuê' "
+                               "LIMIT 1", (ma_sv,)).fetchone()
+            if cur and cur["MaPhong"] == new_room:
+                return
+            end = None
+            if cur:
+                conn.execute("UPDATE HopDong SET TrangThai='Đã kết thúc', NgayKetThuc=? WHERE MaHD=?",
+                             (today.strftime(fmt), cur["MaHD"]))
+                try:
+                    old_end = datetime.strptime(cur["NgayKetThuc"], fmt).date()
+                    end = old_end if old_end > today else None
+                except (TypeError, ValueError):
+                    end = None
+            if new_room is not None:
+                if end is None:
+                    try:
+                        end = today.replace(year=today.year + 1)
+                    except ValueError:                       # 29/02
+                        end = today.replace(year=today.year + 1, day=28)
+                conn.execute("INSERT INTO HopDong(MaSV,MaPhong,NgayBatDau,NgayKetThuc) VALUES(?,?,?,?)",
+                             (ma_sv, new_room, today.strftime(fmt), end.strftime(fmt)))
+    finally:
+        conn.close()
+
+
+def student_fields(editing=False, rooms=None):
     """Các ô của hộp thoại Thêm / Cập nhật sinh viên (thứ tự và bố cục theo mẫu thiết kế).
-    Khi sửa, Mã SV chỉ đọc vì nó là khóa chính, hợp đồng và yêu cầu đang tham chiếu tới."""
+    Khi sửa, Mã SV chỉ đọc vì nó là khóa chính, hợp đồng và yêu cầu đang tham chiếu tới.
+    Chỉ Họ tên và Mã SV là bắt buộc; các ô còn lại để trống được, nhập thiếu số cũng được."""
     return [{"key": "HoTen", "label": "Họ và tên", "ph": "Nguyễn Văn A", "required": True},
             {"key": "MaSV", "label": "Mã sinh viên", "ph": "Nhập mã sinh viên", "required": True,
              "readonly": editing},
             {"key": "NgaySinh", "label": "Ngày sinh (dd/mm/yyyy)", "ph": "12/05/2005"},
             {"key": "GioiTinh", "label": "Giới tính", "kind": "combo", "opts": ["Nam", "Nữ"]},
-            {"key": "CCCD", "label": "CCCD", "ph": "12 chữ số"},
+            {"key": "CCCD", "label": "CCCD", "ph": "Số căn cước (có thể bỏ trống)"},
             {"key": "SDT", "label": "Số điện thoại", "ph": "09xxxxxxxx"},
             {"key": "Lop", "label": "Lớp", "ph": "DHKTPM17A"},
             {"key": "Email", "label": "Email", "ph": "ten@example.com"},
-            {"key": "QueQuan", "label": "Quê quán", "ph": "Xã/Phường, Tỉnh/Thành phố", "span": 2}]
+            {"key": "QueQuan", "label": "Quê quán (chọn tỉnh hoặc tự gõ)", "kind": "combo", "opts": PROVINCES,
+             "editable": True},
+            {"key": "PhongChon", "label": "Phòng", "kind": "combo", "opts": rooms or [NO_ROOM]}]
+
 
 
 EXPORT_HEADERS = ["Mã SV", "Họ và tên", "Ngày sinh", "Giới tính", "Lớp", "SĐT", "Quê quán", "CCCD", "Email",
@@ -362,11 +452,21 @@ ALIASES = {"MaSV": {"ma sv", "masv", "mssv", "ma sinh vien"},
            "QueQuan": {"que quan", "quequan", "dia chi"},
            "CCCD": {"cccd", "so cccd", "can cuoc cong dan", "can cuoc"},
            "Email": {"email", "e-mail", "mail", "thu dien tu"}}
-EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+")
+
+
+def ensure_columns():
+    """Tự thêm cột CCCD, Email vào bảng SinhVien nếu file kytucxa.db cũ chưa có
+    (để trang vẫn chạy được kể cả khi chưa chép đè database.py mới)."""
+    have = {r["name"] for r in db.query("PRAGMA table_info(SinhVien)")}
+    for col in ("CCCD", "Email"):
+        if col not in have:
+            db.execute(f"ALTER TABLE SinhVien ADD COLUMN {col} TEXT")
 
 
 def load_students():
     """Danh sách sinh viên + phòng đang ở (Phong, '' nếu chưa xếp) + cờ DangO."""
+    ensure_columns()
     out = []
     for r in db.query("""
             SELECT s.MaSV, s.HoTen, s.NgaySinh, s.GioiTinh, s.Lop, s.SDT, s.QueQuan, s.CCCD, s.Email,
@@ -418,22 +518,17 @@ def check_student(d):
         c["GioiTinh"] = "Nữ"
     elif g:
         return c, "GioiTinh", "Giới tính chỉ nhận 'Nam' hoặc 'Nữ'."
+    # CCCD / SĐT: không bắt buộc đủ số, chỉ cần toàn chữ số (tối đa 12 / 11 số)
     cccd = re.sub(r"[ .\-]", "", c["CCCD"])
-    if cccd:
-        if re.fullmatch(r"\d{11}", cccd):                # Excel làm mất số 0 đầu
-            cccd = "0" + cccd
-        if not re.fullmatch(r"\d{12}", cccd):
-            return c, "CCCD", "CCCD phải gồm đúng 12 chữ số."
+    if cccd and not re.fullmatch(r"\d{1,12}", cccd):
+        return c, "CCCD", "CCCD chỉ gồm chữ số (tối đa 12 số)."
     c["CCCD"] = cccd
     phone = re.sub(r"[ .\-()]", "", c["SDT"])
-    if phone:
-        if re.fullmatch(r"[1-9]\d{8,9}", phone):         # Excel làm mất số 0 đầu
-            phone = "0" + phone
-        if not re.fullmatch(r"0\d{9,10}", phone):
-            return c, "SDT", "Số điện thoại phải gồm 10-11 chữ số và bắt đầu bằng 0."
+    if phone and not re.fullmatch(r"\d{1,11}", phone):
+        return c, "SDT", "Số điện thoại chỉ gồm chữ số (tối đa 11 số)."
     c["SDT"] = phone
     if c["Email"] and not EMAIL_RE.fullmatch(c["Email"]):
-        return c, "Email", "Email không hợp lệ (ví dụ: ten@example.com)."
+        return c, "Email", "Email cần có dạng ten@tenmien (có dấu @)."
     return c, None, None
 
 
@@ -548,9 +643,10 @@ class SinhVienScreen(tk.Frame):
 
     # ---- thêm / sửa / xóa
     @staticmethod
-    def _validator(editing_ma=None):
+    def _validator(editing_ma=None, cur_room=None):
         """Hàm kiểm tra cho hộp thoại. editing_ma=None: đang THÊM (phải nhập + kiểm tra Mã SV mới);
-        có giá trị: đang SỬA sinh viên mang mã đó (Mã SV bị khóa, CCCD chỉ so với các sinh viên khác)."""
+        có giá trị: đang SỬA sinh viên mang mã đó (Mã SV bị khóa, CCCD chỉ so với các sinh viên khác).
+        cur_room: mã phòng sinh viên đang ở (khi sửa) - giữ nguyên phòng này thì không cần kiểm tra chỗ trống."""
         def check(v):
             ma = None
             if editing_ma is None:
@@ -565,16 +661,24 @@ class SinhVienScreen(tk.Frame):
             clean, key, err = check_student(v)
             if err:
                 return None, (key, err)
-            if clean["CCCD"] and db.query("SELECT 1 FROM SinhVien WHERE CCCD=? AND MaSV<>?",
-                                          (clean["CCCD"], editing_ma or 0), one=True):
+            # CCCD đủ 12 số thì không được trùng người khác (nhập thiếu số thì không so sánh)
+            if len(clean["CCCD"]) == 12 and db.query("SELECT 1 FROM SinhVien WHERE CCCD=? AND MaSV<>?",
+                                                     (clean["CCCD"], editing_ma or 0), one=True):
                 return None, ("CCCD", "CCCD này đã được dùng cho sinh viên khác.")
+            # phòng: "Chưa xếp phòng" -> None; còn lại phải còn chỗ (trừ khi giữ nguyên phòng đang ở)
+            choice = v.get("PhongChon", NO_ROOM)
+            clean["MaPhong"] = None if choice == NO_ROOM else pick_id(choice)
+            if clean["MaPhong"] is not None and clean["MaPhong"] != cur_room:
+                p = next((x for x in db.danh_sach_phong() if x["MaPhong"] == clean["MaPhong"]), None)
+                if p is None or p["TinhTrang"] not in ("Trống", "Còn chỗ"):
+                    return None, ("PhongChon", "Phòng này đã đầy hoặc đang bảo trì, hãy chọn phòng khác.")
             if ma is not None:
                 clean["MaSV"] = ma
             return clean, None
         return check
 
     def on_add(self):
-        d = form_modal(self, "Thêm sinh viên", student_fields(False), validate=self._validator())
+        d = form_modal(self, "Thêm sinh viên", student_fields(False, room_options()), validate=self._validator())
         if not d:
             return
         try:
@@ -582,6 +686,7 @@ class SinhVienScreen(tk.Frame):
         except sqlite3.IntegrityError:
             return error("Không lưu được: mã sinh viên đã tồn tại.")
         db.ghi_nhat_ky("sv", f"Thêm sinh viên **{d['HoTen']}**")
+        self._save_room(d)
         self.filter = FILTERS[0]
         self.kw.set("")
         self.refresh()
@@ -591,12 +696,28 @@ class SinhVienScreen(tk.Frame):
         r = self._student(self.sel)
         if not r:
             return
-        d = form_modal(self, "Cập nhật sinh viên", student_fields(True), r, validate=self._validator(r["MaSV"]))
+        cur = current_room(r["MaSV"])
+        opts = room_options(cur)
+        values = dict(r, PhongChon=next((o for o in opts if cur is not None and o.startswith(f"{cur} - ")), NO_ROOM))
+        d = form_modal(self, "Cập nhật sinh viên", student_fields(True, opts), values,
+                       validate=self._validator(r["MaSV"], cur))
         if not d:
             return
+        d["MaSV"] = r["MaSV"]
         db.execute(SQL_UPDATE, tuple(d[c] for c in SV_COLS) + (r["MaSV"],))
         db.ghi_nhat_ky("sv", f"Cập nhật sinh viên **{d['HoTen']}**")
+        self._save_room(d, cur)
         self.refresh()
+
+    @staticmethod
+    def _save_room(d, old_room=None):
+        """Ghi phòng đã chọn trong hộp thoại thành hợp đồng (tạo mới / chuyển phòng / trả phòng)."""
+        if d["MaPhong"] == old_room:
+            return
+        assign_room(d["MaSV"], d["MaPhong"])
+        if d["MaPhong"] is not None:
+            ten = db.query("SELECT TenPhong FROM Phong WHERE MaPhong=?", (d["MaPhong"],), one=True)["TenPhong"]
+            db.ghi_nhat_ky("phong", f"Đăng ký phòng {ten} – **{d['HoTen']}**")
 
     def on_delete(self):
         r = self._student(self.sel)
