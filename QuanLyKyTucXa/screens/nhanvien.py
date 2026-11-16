@@ -36,10 +36,31 @@ class NhanVienScreen(tk.Frame):
         self.selected_id = None
         self.rows_data = []
         self.kw = tk.StringVar(master=self)
+        self._ensure_schema()
         self._style()
         self._build()
         self.refresh()
         self.kw.trace_add("write", lambda *_: self._search())
+
+    def _ensure_schema(self):
+        """Bổ sung các trường cần thiết mà không xóa dữ liệu cũ."""
+        columns = {r["name"] for r in db.query("PRAGMA table_info(NhanVien)")}
+        additions = {
+            "SoDienThoai": "TEXT DEFAULT ''",
+            "Email": "TEXT DEFAULT ''",
+            "TrangThai": "TEXT DEFAULT 'Đang hoạt động'",
+        }
+        for name, definition in additions.items():
+            if name not in columns:
+                db.execute(f"ALTER TABLE NhanVien ADD COLUMN {name} {definition}")
+
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS PhanCongPhong (
+                MaNV INTEGER NOT NULL REFERENCES NhanVien(MaNV) ON DELETE CASCADE,
+                MaPhong INTEGER NOT NULL REFERENCES Phong(MaPhong) ON DELETE CASCADE,
+                PRIMARY KEY (MaNV, MaPhong)
+            )
+        """)
 
     def _style(self):
         st = ttk.Style(self)
@@ -57,6 +78,15 @@ class NhanVienScreen(tk.Frame):
                foreground=[("selected", NAVY)])
         st.configure("Staff.Vertical.TScrollbar", background="#E6ECF7",
                      troughcolor=WHITE, bordercolor=WHITE, arrowcolor=MUTED)
+        st.configure("Staff.TCombobox", fieldbackground="#F4F7FD", background="#EAF1FC",
+                     foreground=NAVY, bordercolor=BORDER, lightcolor=BORDER,
+                     darkcolor=BORDER, arrowcolor=BLUE, arrowsize=16,
+                     padding=(12, 10), font=(FONT, 10))
+        st.map("Staff.TCombobox", fieldbackground=[("readonly", "#F4F7FD"), ("focus", WHITE)],
+               foreground=[("readonly", NAVY)],
+               selectbackground=[("readonly", "#DCEAFF")],
+               selectforeground=[("readonly", NAVY)],
+               bordercolor=[("focus", BLUE), ("!focus", BORDER)])
 
     def _build(self):
         outer = tk.Frame(self, bg=BG)
@@ -73,12 +103,28 @@ class NhanVienScreen(tk.Frame):
 
         right = tk.Frame(header, bg=BG)
         right.pack(side="right", anchor="n")
-        search = tk.Entry(right, textvariable=self.kw, relief="flat", bg=WHITE,
-                          fg=NAVY, insertbackground=BLUE, font=(FONT, 9),
-                          highlightthickness=1, highlightbackground=BORDER,
-                          highlightcolor=BLUE, width=27)
-        search.pack(side="left", ipady=9, padx=(0, 10))
-        search.insert(0, "")
+
+        # Thanh tìm kiếm có biểu tượng kính lúp và chữ gợi ý
+        search_box = tk.Frame(right, bg=WHITE, highlightthickness=1,
+                              highlightbackground=BORDER, highlightcolor=BLUE)
+        search_box.pack(side="left", padx=(0, 10), ipady=2)
+        # Vẽ kính lúp bằng Canvas để không phụ thuộc font/ký tự Unicode của Windows.
+        search_icon = tk.Canvas(search_box, width=22, height=22, bg=WHITE,
+                                highlightthickness=0, bd=0)
+        search_icon.pack(side="left", padx=(11, 6), pady=7)
+        search_icon.create_oval(3, 3, 14, 14, outline=BLUE, width=2)
+        search_icon.create_line(13, 13, 19, 19, fill=BLUE, width=2,
+                                capstyle="round")
+        self.search_entry = tk.Entry(
+            search_box, textvariable=self.kw, relief="flat", bg=WHITE,
+            fg=MUTED, insertbackground=BLUE, font=(FONT, 9), width=29,
+            borderwidth=0
+        )
+        self.search_entry.pack(side="left", ipady=10, padx=(0, 12))
+        self.search_placeholder = "Tìm theo tên, chức vụ, email..."
+        self.search_entry.insert(0, self.search_placeholder)
+        self.search_entry.bind("<FocusIn>", self._search_focus_in)
+        self.search_entry.bind("<FocusOut>", self._search_focus_out)
         self.add_btn = tk.Button(right, text="＋  Thêm nhân viên", command=self.on_add,
                                  bg=BLUE, fg=WHITE, activebackground="#0E4FAE",
                                  activeforeground=WHITE, relief="flat", bd=0,
@@ -105,21 +151,19 @@ class NhanVienScreen(tk.Frame):
         self.count_label.pack(side="left")
         self.page_size_var = tk.StringVar(value="5")
         cb = ttk.Combobox(toolbar, textvariable=self.page_size_var, values=("5", "10", "20"),
-                          state="readonly", width=4, font=(FONT, 9))
+                          state="readonly", width=5, style="Staff.TCombobox")
         cb.pack(side="left", padx=7, ipady=3)
         cb.bind("<<ComboboxSelected>>", lambda _e: self._change_page_size())
         tk.Label(toolbar, text="bản ghi", bg=WHITE, fg=NAVY, font=(FONT, 9)).pack(side="left")
 
         export = tk.Frame(toolbar, bg=WHITE)
         export.pack(side="right")
-        tk.Button(export, text="▣  Xuất Excel", command=self.export_excel,
-                  bg=WHITE, fg=NAVY, activebackground="#F3F7FF",
-                  relief="flat", highlightthickness=1, highlightbackground=BORDER,
-                  font=(FONT, 9, "bold"), padx=12, pady=7, cursor="hand2").pack(side="left", padx=(0, 8))
-        tk.Button(export, text="▣  Xuất PDF", command=self.export_pdf,
-                  bg=WHITE, fg=NAVY, activebackground="#F3F7FF",
-                  relief="flat", highlightthickness=1, highlightbackground=BORDER,
-                  font=(FONT, 9, "bold"), padx=12, pady=7, cursor="hand2").pack(side="left")
+        self._tool_button(export, "⇩  Nhập từ Excel", self.import_excel,
+                          bg="#EAF2FF", fg="#245DB5").pack(side="left", padx=(0, 8))
+        self._tool_button(export, "⇧  Xuất ra Excel", self.export_excel,
+                          bg="#E7F6ED", fg="#16804A").pack(side="left", padx=(0, 8))
+        self._tool_button(export, "▤  Xuất PDF", self.export_pdf,
+                          bg="#F0F3F8", fg="#52627A").pack(side="left")
 
         line = tk.Frame(card, bg=BORDER, height=1)
         line.pack(fill="x")
@@ -163,6 +207,18 @@ class NhanVienScreen(tk.Frame):
                                   highlightbackground=BORDER, width=3, font=(FONT, 12))
         self.next_btn.pack(side="left", padx=3)
 
+    def _tool_button(self, parent, text, command, bg, fg):
+        button = tk.Button(parent, text=text, command=command, bg=bg, fg=fg,
+                           activebackground=fg, activeforeground=WHITE,
+                           relief="flat", bd=0, font=(FONT, 9, "bold"),
+                           padx=15, pady=10, cursor="hand2",
+                           highlightthickness=1, highlightbackground=bg,
+                           highlightcolor=fg)
+        hover_bg = fg
+        button.bind("<Enter>", lambda _e: button.config(bg=hover_bg, fg=WHITE))
+        button.bind("<Leave>", lambda _e: button.config(bg=bg, fg=fg))
+        return button
+
     def _stat(self, parent, col, label, symbol, color):
         box = tk.Frame(parent, bg=WHITE, highlightthickness=1, highlightbackground=BORDER)
         box.grid(row=0, column=col, sticky="nsew", padx=(0 if col == 0 else 10, 0), ipady=9)
@@ -198,12 +254,25 @@ class NhanVienScreen(tk.Frame):
         self.stat_values[3].config(text=str(sum(r["TrangThai"] == "Đang hoạt động" for r in self.rows_data)))
         self._render()
 
+    def _search_focus_in(self, _event=None):
+        if self.kw.get() == self.search_placeholder:
+            self.kw.set("")
+            self.search_entry.config(fg=NAVY)
+
+    def _search_focus_out(self, _event=None):
+        if not self.kw.get().strip():
+            self.kw.set(self.search_placeholder)
+            self.search_entry.config(fg=MUTED)
+
     def _search(self):
         self.page = 0
         self._render()
 
     def _filtered(self):
-        key = self.kw.get().strip().lower()
+        raw_key = self.kw.get().strip()
+        if raw_key == self.search_placeholder:
+            raw_key = ""
+        key = raw_key.lower()
         if not key:
             return self.rows_data
         return [r for r in self.rows_data if key in " ".join(str(r[k]) for k in
@@ -291,7 +360,7 @@ class NhanVienScreen(tk.Frame):
             vars_[key] = var
             if kind == "combo":
                 w = ttk.Combobox(body, textvariable=var, values=values or [], state="readonly",
-                                 font=(FONT, 9))
+                                 style="Staff.TCombobox")
             else:
                 w = tk.Entry(body, textvariable=var, relief="flat", bg="#FBFCFF",
                              fg=NAVY, font=(FONT, 10), highlightthickness=1,
@@ -302,7 +371,8 @@ class NhanVienScreen(tk.Frame):
 
         field("Tên nhân viên", "HoTen", required=True)
         field("Tên đăng nhập", "TenDangNhap", required=True)
-        field("Chức vụ", "VaiTro", "nhanvien", "combo", ["nhanvien", "admin"])
+        role_value = "Quản lý" if current.get("VaiTro") == "admin" else "Nhân viên"
+        field("Chức vụ", "VaiTro", role_value, "combo", ["Nhân viên", "Quản lý"])
         field("Số điện thoại", "SoDienThoai")
         field("Email", "Email")
         field("Mật khẩu" + (" (để trống nếu không đổi)" if current else ""), "MatKhau",
@@ -315,9 +385,10 @@ class NhanVienScreen(tk.Frame):
         room_frame = tk.Frame(body, bg="#FBFCFF", highlightthickness=1, highlightbackground=BORDER)
         room_frame.pack(fill="both", expand=True)
         room_list = tk.Listbox(room_frame, selectmode="multiple", height=5,
-                               bg="#FBFCFF", fg=NAVY, relief="flat",
-                               font=(FONT, 9), selectbackground="#DCEBFF",
-                               selectforeground=NAVY, activestyle="none")
+                               bg="#F5F8FE", fg=NAVY, relief="flat",
+                               font=(FONT, 10), selectbackground="#DCEAFF",
+                               selectforeground="#124B9A", activestyle="none",
+                               highlightthickness=0, selectborderwidth=0, exportselection=False)
         room_list.pack(side="left", fill="both", expand=True, padx=8, pady=6)
         room_sb = ttk.Scrollbar(room_frame, orient="vertical", command=room_list.yview)
         room_sb.pack(side="right", fill="y")
@@ -333,6 +404,7 @@ class NhanVienScreen(tk.Frame):
         result = {}
         def save():
             values = {k: v.get().strip() for k, v in vars_.items()}
+            values["VaiTro"] = "admin" if values.get("VaiTro") == "Quản lý" else "nhanvien"
             if not values["HoTen"] or not values["TenDangNhap"]:
                 messagebox.showwarning("Thiếu thông tin", "Vui lòng nhập tên nhân viên và tên đăng nhập.", parent=win)
                 return
@@ -419,6 +491,65 @@ class NhanVienScreen(tk.Frame):
         db.execute("DELETE FROM PhanCongPhong WHERE MaNV=?", (self.selected_id,))
         db.execute("DELETE FROM NhanVien WHERE MaNV=?", (self.selected_id,))
         self.refresh()
+
+    def import_excel(self):
+        """Nhập Excel để cập nhật thông tin nhân viên đã có trong hệ thống."""
+        from tkinter import filedialog
+        from screens.xlsx_io import read_xlsx
+        path = filedialog.askopenfilename(
+            parent=self, title="Chọn file Excel nhân viên",
+            filetypes=[("Excel Workbook", "*.xlsx")])
+        if not path:
+            return
+        try:
+            data = read_xlsx(path)
+            if len(data) < 2:
+                messagebox.showwarning("File Excel trống", "File không có dữ liệu nhân viên.", parent=self)
+                return
+            headers = [str(x).strip().lower() for x in data[0]]
+            aliases = {
+                "ma nv": ("MaNV", "Mã NV"), "mã nv": ("MaNV", "Mã NV"),
+                "họ tên": ("HoTen", "Họ tên"), "ten dang nhap": ("TenDangNhap", "Tên đăng nhập"),
+                "tên đăng nhập": ("TenDangNhap", "Tên đăng nhập"),
+                "chức vụ": ("VaiTro", "Chức vụ"), "so dien thoai": ("SoDienThoai", "Số điện thoại"),
+                "số điện thoại": ("SoDienThoai", "Số điện thoại"), "email": ("Email", "Email"),
+                "trạng thái": ("TrangThai", "Trạng thái")
+            }
+            index = {}
+            for i, h in enumerate(headers):
+                if h in aliases:
+                    index[aliases[h][0]] = i
+            if "HoTen" not in index or "TenDangNhap" not in index:
+                messagebox.showerror("Sai định dạng", "File cần có ít nhất hai cột: Họ tên và Tên đăng nhập.", parent=self)
+                return
+            existing = {str(r["TenDangNhap"]).lower(): dict(r) for r in db.query("SELECT * FROM NhanVien")}
+            updated, skipped = 0, 0
+            for row in data[1:]:
+                if not row:
+                    continue
+                def cell(key):
+                    i = index.get(key)
+                    return str(row[i]).strip() if i is not None and i < len(row) else ""
+                username = cell("TenDangNhap")
+                fullname = cell("HoTen")
+                if not username or not fullname or username.lower() not in existing:
+                    skipped += 1
+                    continue
+                old = existing[username.lower()]
+                role_text = cell("VaiTro").lower()
+                role = "admin" if role_text in ("admin", "quản lý", "quan ly") else old.get("VaiTro", "nhanvien")
+                status = cell("TrangThai") or old.get("TrangThai", "Đang hoạt động")
+                if status not in ("Đang hoạt động", "Tạm khóa"):
+                    status = old.get("TrangThai", "Đang hoạt động")
+                db.execute("""UPDATE NhanVien SET HoTen=?, VaiTro=?, SoDienThoai=?, Email=?, TrangThai=?
+                    WHERE MaNV=?""", (fullname, role, cell("SoDienThoai") or old.get("SoDienThoai", ""),
+                    cell("Email") or old.get("Email", ""), status, old["MaNV"]))
+                updated += 1
+            self.refresh()
+            messagebox.showinfo("Nhập Excel hoàn tất",
+                f"Đã cập nhật: {updated} nhân viên\nBỏ qua: {skipped} dòng (không tìm thấy tài khoản phù hợp).\n\nLưu ý: chức năng nhập Excel cập nhật tài khoản đã tồn tại, không tạo tài khoản mới.", parent=self)
+        except Exception as exc:
+            messagebox.showerror("Không thể nhập Excel", f"Không đọc được file hoặc dữ liệu không hợp lệ.\n\nChi tiết: {exc}", parent=self)
 
     def export_excel(self):
         from tkinter import filedialog
