@@ -151,12 +151,14 @@ def stat_card(parent, col, title, value, sub, link=None):
 
 def bill_rows(rows):
     return [{"Thang": r["Thang"], "TienPhong": money(r["TienPhong"]), "TienDien": money(r["TienDien"]),
-             "TienNuoc": money(r["TienNuoc"]), "TongTien": money(r["TongTien"]), "DaThu": money(r["DaThu"]),
+             "TienNuoc": money(r["TienNuoc"]), "TienKhac": money(r["TienKhac"] if "TienKhac" in r.keys() else 0),
+             "TongTien": money(r["TongTien"]), "DaThu": money(r["DaThu"]),
              "CongNo": money(r["TongTien"] - r["DaThu"]), "TrangThai": r["TrangThai"]} for r in rows]
 
 
 BILL_COLS = [("Thang", "Tháng", 80), ("TienPhong", "Tiền phòng", 100), ("TienDien", "Tiền điện", 90),
-             ("TienNuoc", "Tiền nước", 90), ("TongTien", "Tổng", 100), ("DaThu", "Đã thu", 100),
+             ("TienNuoc", "Tiền nước", 90), ("TienKhac", "Dịch vụ", 80), ("TongTien", "Tổng", 100),
+             ("DaThu", "Đã thu", 100),
              ("CongNo", "Còn nợ", 100), ("TrangThai", "Trạng thái", 110)]
 HOME_BILL_COLS = [("Thang", "Tháng", 70), ("TienPhong", "Tiền phòng", 90), ("TienDien", "Điện", 80),
                   ("TienNuoc", "Nước", 80), ("TongTien", "Tổng", 90), ("TrangThai", "Trạng thái", 100)]

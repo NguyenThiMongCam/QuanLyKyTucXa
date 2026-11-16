@@ -17,7 +17,7 @@ from screens.thongke import ThongKeScreen
 
 MENU = [("Trang chủ", "home", DashboardScreen, False, "dashboard"), ("Sinh viên", "student", SinhVienScreen, False, "sinhvien"),
         ("Phòng", "room", PhongScreen, False, "phong"), ("Hợp đồng", "contract", HopDongScreen, False, "hopdong"),
-        ("Hóa đơn", "bill", HoaDonScreen, False, "hoadon"), ("Dịch vụ", "service", DichVuScreen, False, "dichvu"),
+        ("Hóa đơn", "bill", HoaDonScreen, False, "hoadon"), ("Dịch vụ &  Sữa chữa", "service", DichVuScreen, False, "dichvu"),
         ("Thống kê", "stats", ThongKeScreen, False, "thongke"), ("Nhân viên", "staff", NhanVienScreen, True, "nhanvien")]
 
 
