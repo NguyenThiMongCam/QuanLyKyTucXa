@@ -103,9 +103,19 @@ def hash_pw(pw):
 
 
 def login(username, password):
+    """Đăng nhập nhân viên. Trả về dict, hoặc None nếu sai thông tin / tài khoản đang bị tạm khóa."""
     row = query("SELECT * FROM NhanVien WHERE TenDangNhap=? AND MatKhau=?",
                 (username, hash_pw(password)), one=True)
+    if row and row["TrangThai"] == "Tạm khóa":
+        return None
     return dict(row) if row else None
+
+
+def tai_khoan_bi_khoa(username, password):
+    """True nếu thông tin đăng nhập ĐÚNG nhưng tài khoản đang bị tạm khóa (để báo lỗi rõ ràng)."""
+    row = query("SELECT TrangThai FROM NhanVien WHERE TenDangNhap=? AND MatKhau=?",
+                (username, hash_pw(password)), one=True)
+    return bool(row and row["TrangThai"] == "Tạm khóa")
 
 
 DEFAULT_STUDENT_PW = "123456"  # mật khẩu mặc định của sinh viên chưa đặt mật khẩu riêng
@@ -169,7 +179,7 @@ def danh_sach_phong():
     """Danh sách phòng kèm số người đang ở và tình trạng (Trống/Còn chỗ/Đầy/Bảo trì)."""
     rows = query("""
         SELECT p.MaPhong, p.TenPhong, p.Tang, p.TrangThai, l.MaLoai, l.TenLoai,
-               l.SoGiuong, l.GiaThue,
+               l.SoGiuong, l.GiaThue, p.MaNV, (SELECT n.HoTen FROM NhanVien n WHERE n.MaNV=p.MaNV) AS NhanVienPT,
                (SELECT COUNT(*) FROM HopDong h WHERE h.MaPhong=p.MaPhong
                 AND h.TrangThai='Đang thuê') AS DangO
         FROM Phong p JOIN LoaiPhong l ON l.MaLoai=p.MaLoai ORDER BY p.TenPhong""")
@@ -198,6 +208,8 @@ def init_db():
     _backfill_log()
     if query("SELECT COUNT(*) FROM NhanVien", one=True)[0] == 0:
         _seed()
+        _migrate_nhan_vien()          # điền chức vụ/email cho 2 tài khoản mẫu rồi thêm nhân viên mẫu + phân công phòng
+        seed_demo_staff()
 
 
 def _migrate():
@@ -206,11 +218,62 @@ def _migrate():
     for col in ("MatKhau", "CCCD", "Email"):
         if col not in cols:
             execute(f"ALTER TABLE SinhVien ADD COLUMN {col} TEXT")
+    _migrate_nhan_vien()
     have = [r["name"] for r in query("PRAGMA table_info(HoaDon)")]      # hóa đơn: ngày lập, dịch vụ khác, chỉ số đồng hồ
     for col, typ in (("NgayLap", "TEXT"), ("TienKhac", "INTEGER DEFAULT 0"), ("ChiSoDien", "REAL"),
                      ("ChiSoNuoc", "REAL")):
         if col not in have:
             execute(f"ALTER TABLE HoaDon ADD COLUMN {col} {typ}")
+
+
+CHUC_VU = ["Quản lý", "Nhân viên", "Kế toán", "Bảo vệ", "Kỹ thuật"]    # "Quản lý" = quyền admin, còn lại = nhân viên
+
+
+def vai_tro_cua(chuc_vu):
+    """Chức vụ -> vai trò đăng nhập: chỉ 'Quản lý' mới có quyền quản trị (vào được trang Nhân viên)."""
+    return "admin" if chuc_vu == "Quản lý" else "nhanvien"
+
+
+def _migrate_nhan_vien():
+    """Nhân viên: thêm chức vụ, SĐT, email, trạng thái, ảnh; Phòng: thêm nhân viên phụ trách (MaNV)."""
+    have = [r["name"] for r in query("PRAGMA table_info(NhanVien)")]
+    for col, typ in (("ChucVu", "TEXT"), ("SDT", "TEXT"), ("Email", "TEXT"), ("TrangThai", "TEXT DEFAULT 'Đang hoạt động'"),
+                     ("Anh", "TEXT"), ("NgayTao", "TEXT")):
+        if col not in have:
+            execute(f"ALTER TABLE NhanVien ADD COLUMN {col} {typ}")
+    execute("UPDATE NhanVien SET TrangThai='Đang hoạt động' "
+            "WHERE TrangThai IS NULL OR TRIM(TrangThai)='' OR TrangThai='Hoạt động'")
+    execute("UPDATE NhanVien SET ChucVu=CASE VaiTro WHEN 'admin' THEN 'Quản lý' ELSE 'Nhân viên' END "
+            "WHERE ChucVu IS NULL OR TRIM(ChucVu)=''")
+    execute("UPDATE NhanVien SET Email=TenDangNhap||'@kytucxa.vn' WHERE Email IS NULL OR TRIM(Email)=''")
+    execute("UPDATE NhanVien SET NgayTao='2000-01-01' WHERE NgayTao IS NULL")   # tài khoản cũ: không tính là 'mới'
+    if "MaNV" not in [r["name"] for r in query("PRAGMA table_info(Phong)")]:
+        execute("ALTER TABLE Phong ADD COLUMN MaNV INTEGER REFERENCES NhanVien(MaNV)")
+
+
+SAMPLE_STAFF = [  # (tên đăng nhập, họ tên, chức vụ, SĐT, email, trạng thái, các phòng phụ trách)
+    ("an", "Nguyễn Văn An", "Quản lý", "0987654321", "an@kytucxa.vn", "Đang hoạt động", ["A101", "A102"]),
+    ("bich", "Trần Thị Bích", "Nhân viên", "0321987654", "bich@kytucxa.vn", "Đang hoạt động", ["A201"]),
+    ("hoang", "Lê Minh Hoàng", "Kế toán", "0912345001", "hoang@kytucxa.vn", "Tạm khóa", []),
+    ("linh", "Phạm Thùy Linh", "Nhân viên", "0912345002", "linh@kytucxa.vn", "Đang hoạt động", ["B101"]),
+    ("tuan", "Đỗ Anh Tuấn", "Kỹ thuật", "0912345003", "tuan@kytucxa.vn", "Đang hoạt động", ["B201"]),
+    ("bao", "Vũ Quốc Bảo", "Bảo vệ", "0912345004", "bao@kytucxa.vn", "Đang hoạt động", []),
+]
+
+
+def seed_demo_staff():
+    """Thêm 6 nhân viên mẫu (mật khẩu 123456) và phân công phòng. Bỏ qua tên đăng nhập đã có. Trả về số người thêm."""
+    n = 0
+    for user, ten, cv, sdt, mail, tt, phongs in SAMPLE_STAFF:
+        if query("SELECT 1 FROM NhanVien WHERE TenDangNhap=?", (user,), one=True):
+            continue
+        ma = execute("INSERT INTO NhanVien(TenDangNhap,MatKhau,HoTen,VaiTro,ChucVu,SDT,Email,TrangThai,NgayTao) "
+                     "VALUES(?,?,?,?,?,?,?,?,date('now','-60 day'))",
+                     (user, hash_pw("123456"), ten, vai_tro_cua(cv), cv, sdt, mail, tt))
+        for ph in phongs:
+            execute("UPDATE Phong SET MaNV=? WHERE TenPhong=? AND MaNV IS NULL", (ma, ph))
+        n += 1
+    return n
 
 
 def _seed_content():
