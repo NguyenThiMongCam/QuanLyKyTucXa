@@ -123,19 +123,81 @@ def time_label(ts, now=None):
     return t.strftime("%d/%m")
 
 
-def search_all(text):
-    like = f"%{text}%"
-    res = []
-    for s in db.query("SELECT MaSV,HoTen,Lop FROM SinhVien WHERE CAST(MaSV AS TEXT) LIKE ? OR HoTen LIKE ? OR Lop LIKE ? "
-                      "ORDER BY MaSV LIMIT 6", (like,) * 3):
-        res.append(("Sinh viên", f"{s['HoTen']} · MSSV {s['MaSV']}" + (f" · {s['Lop']}" if s["Lop"] else ""),
-                    ("sinhvien", {"keyword": s["HoTen"]})))
-    for p in db.query("SELECT TenPhong FROM Phong WHERE TenPhong LIKE ? ORDER BY TenPhong LIMIT 4", (like,)):
-        res.append(("Phòng", f"Phòng {p['TenPhong']}", ("phong", {"keyword": p["TenPhong"]})))
+def search_all(text, is_admin=True):
+    """Tìm trên toàn hệ thống (không phân biệt hoa/thường và dấu). Trả về [(loại, mô tả, (trang, tham số goto))]."""
+    from screens.sinhvien import fold                         # nhập trễ để tránh vòng lặp import
+    kw = fold(text.strip())
+    if not kw:
+        return []
+    hit = lambda *parts: kw in fold(" ".join(str(p or "") for p in parts))
+    res, cap = [], 5
+
+    def add(kind, label, target, bucket):
+        if bucket.setdefault(kind, 0) < cap:
+            bucket[kind] += 1
+            res.append((kind, label, target))
+    n = {}
+    for s in db.query("SELECT MaSV,HoTen,Lop,SDT,CCCD,Email FROM SinhVien ORDER BY MaSV"):
+        if hit(s["MaSV"], s["HoTen"], s["Lop"], s["SDT"], s["CCCD"], s["Email"]):
+            add("Sinh viên", f"{s['HoTen']} · MSSV {s['MaSV']}" + (f" · {s['Lop']}" if s["Lop"] else ""),
+                ("sinhvien", {"keyword": s["HoTen"]}), n)
+    for p in db.danh_sach_phong():
+        if hit(p["TenPhong"], p["TenLoai"], p["NhanVienPT"]):
+            add("Phòng", f"Phòng {p['TenPhong']} · {p['TenLoai']}" + (f" · phụ trách: {p['NhanVienPT']}"
+                                                                      if p["NhanVienPT"] else ""),
+                ("phong", {"keyword": p["TenPhong"]}), n)
+    for h in db.query("""SELECT h.MaHD, h.TrangThai, s.HoTen, p.TenPhong FROM HopDong h
+                         JOIN SinhVien s ON s.MaSV=h.MaSV JOIN Phong p ON p.MaPhong=h.MaPhong ORDER BY h.MaHD DESC"""):
+        if hit(h["MaHD"], h["HoTen"], h["TenPhong"]):
+            add("Hợp đồng", f"Hợp đồng #{h['MaHD']} · {h['HoTen']} · phòng {h['TenPhong']} · {h['TrangThai']}",
+                ("hopdong", {"keyword": str(h["HoTen"])}), n)
     for h in db.query("SELECT p.TenPhong, h.Thang FROM HoaDon h JOIN Phong p ON p.MaPhong=h.MaPhong "
-                      "WHERE p.TenPhong LIKE ? OR h.Thang LIKE ? ORDER BY h.Thang DESC LIMIT 4", (like,) * 2):
-        res.append(("Hóa đơn", f"Hóa đơn phòng {h['TenPhong']} · {h['Thang']}", ("hoadon", {"keyword": h["TenPhong"]})))
+                      "ORDER BY h.Thang DESC"):
+        if hit(h["TenPhong"], h["Thang"]):
+            add("Hóa đơn", f"Hóa đơn phòng {h['TenPhong']} · {h['Thang']}", ("hoadon", {"keyword": h["TenPhong"]}), n)
+    for d in db.query("SELECT TenDV, DonVi FROM DichVu ORDER BY MaDV"):
+        if hit(d["TenDV"], d["DonVi"]):
+            add("Dịch vụ", f"Dịch vụ {d['TenDV']}", ("dichvu", {"keyword": d["TenDV"]}), n)
+    if is_admin:                                              # trang Nhân viên chỉ dành cho quản lý
+        for v in db.query("SELECT HoTen, ChucVu, Email, SDT, TenDangNhap FROM NhanVien ORDER BY MaNV"):
+            if hit(v["HoTen"], v["ChucVu"], v["Email"], v["SDT"], v["TenDangNhap"]):
+                add("Nhân viên", f"{v['HoTen']} · {v['ChucVu'] or 'Nhân viên'}", ("nhanvien", {"keyword": v["HoTen"]}), n)
     return res
+
+
+def show_search_results(parent, text, go, is_admin=True):
+    """Tìm `text` trên toàn hệ thống. 1 kết quả -> mở thẳng trang đó; nhiều kết quả -> hộp danh sách, bấm đúp để mở.
+    go(target) mở trang. Dùng chung cho Trang chủ và Thống kê."""
+    text = text.strip()
+    if not text:
+        return
+    res = search_all(text, is_admin)
+    if not res:
+        return messagebox.showinfo("Tìm kiếm", f"Không tìm thấy kết quả cho “{text}”.")
+    if len(res) == 1:
+        return go(res[0][2])
+    win = tk.Toplevel(parent)
+    win.title(f"Kết quả cho “{text}”")
+    win.configure(bg="white")
+    win.transient(parent.winfo_toplevel())
+    tk.Label(win, text=f"{len(res)} kết quả - bấm đúp để mở", bg="white", fg=NAVY, font=(FONT, 11, "bold")).pack(
+        anchor="w", padx=16, pady=(14, 6))
+    lb = tk.Listbox(win, width=64, height=min(12, len(res)), font=(FONT, 10), activestyle="none", bd=0,
+                    highlightthickness=1, highlightbackground=BORDER, selectbackground=PRIMARY)
+    for kind, label, _t in res:
+        lb.insert("end", f"  [{kind}]  {label}")
+    lb.pack(padx=16, pady=(0, 14))
+
+    def open_sel(_e=None):
+        sel = lb.curselection()
+        if sel:
+            win.destroy()
+            go(res[sel[0]][2])
+    lb.bind("<Double-1>", open_sel)
+    lb.bind("<Return>", open_sel)
+    win.bind("<Escape>", lambda _e: win.destroy())
+    lb.selection_set(0)
+    lb.focus_set()
 
 
 # ---------------------------------------------------------------------- thành phần giao diện
@@ -375,33 +437,7 @@ class DashboardScreen(tk.Frame):
         text = self.entry.get().strip()
         if not text or text == PLACEHOLDER:
             return
-        res = search_all(text)
-        if not res:
-            return messagebox.showinfo("Tìm kiếm", f"Không tìm thấy kết quả cho “{text}”.")
-        if len(res) == 1:
-            return self.go(res[0][2])
-        win = tk.Toplevel(self)
-        win.title(f"Kết quả cho “{text}”")
-        win.configure(bg="white")
-        win.transient(self.winfo_toplevel())
-        tk.Label(win, text=f"{len(res)} kết quả - bấm đúp để mở", bg="white", fg=NAVY, font=(FONT, 11, "bold")).pack(
-            anchor="w", padx=16, pady=(14, 6))
-        lb = tk.Listbox(win, width=56, height=min(10, len(res)), font=(FONT, 10), activestyle="none", bd=0,
-                        highlightthickness=1, highlightbackground=BORDER, selectbackground=PRIMARY)
-        for kind, label, _t in res:
-            lb.insert("end", f"  [{kind}]  {label}")
-        lb.pack(padx=16, pady=(0, 14))
-
-        def open_sel(_e=None):
-            sel = lb.curselection()
-            if sel:
-                win.destroy()
-                self.go(res[sel[0]][2])
-        lb.bind("<Double-1>", open_sel)
-        lb.bind("<Return>", open_sel)
-        win.bind("<Escape>", lambda _e: win.destroy())
-        lb.selection_set(0)
-        lb.focus_set()
+        show_search_results(self, text, self.go, self.user.get("VaiTro") == "admin")
 
     # ---- xử lý yêu cầu sửa chữa / về muộn của sinh viên
     def requests_dialog(self):
